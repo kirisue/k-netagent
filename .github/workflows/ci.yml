@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.400
+      - run: dotnet restore TestAgent.slnx
+      - run: dotnet build TestAgent.slnx -c Release --no-restore
+      - run: dotnet test TestAgent.slnx -c Release --no-build --no-restore
+      - name: Verify self-contained publish
+        run: >-
+          dotnet publish src/TestAgent.Desktop/TestAgent.Desktop.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=false -p:PublishTrimmed=false
+          -p:DebugType=None -p:DebugSymbols=false
+          -o artifacts/publish-check

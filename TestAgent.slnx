@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/TestAgent.Core/TestAgent.Core.csproj" />
+  <Project Path="src/TestAgent.Infrastructure/TestAgent.Infrastructure.csproj" />
+  <Project Path="src/TestAgent.Desktop/TestAgent.Desktop.csproj" />
+  <Project Path="tests/TestAgent.Tests/TestAgent.Tests.csproj" />
+</Solution>
