@@ -23,8 +23,10 @@ public sealed record MemoryEntry(string Id, string Name, string Content, bool En
     MemoryScope Scope = MemoryScope.User, string? ScopeId = null, IReadOnlyList<string>? Tags = null);
 public sealed record SessionSearchHit(string SessionId, string SessionTitle, ChatRole Role, string Snippet,
     DateTimeOffset Timestamp);
+public sealed record ImageInput(string MimeType, byte[] Data, string Sha256, int Width, int Height);
 public sealed record ProviderSettings(string ProviderId, string Endpoint, string Model, int MaxOutputTokens = 4096,
-    int TimeoutSeconds = 120, int MaxContextMessages = 30, bool SelfReviewEnabled = true, int MaxSelfReviewRounds = 1);
+    int TimeoutSeconds = 120, int MaxContextMessages = 30, bool SelfReviewEnabled = true, int MaxSelfReviewRounds = 1,
+    bool SupportsImageInput = false);
 public sealed record AppSettings(ProviderSettings Provider, string SystemPrompt = "You are a helpful desktop AI assistant.", int Version = 1);
 public sealed record ToolParameterDefinition(string Name, string Type, string Description, bool Required = false,
     IReadOnlyList<string>? Enum = null);
@@ -53,13 +55,14 @@ public sealed record ToolSession(string Id, string ParentSessionId, string ToolN
 public sealed class ToolSessionNeedsReviewException(string message) : InvalidOperationException(message);
 public sealed class DuplicateToolRequestException(string message) : InvalidOperationException(message);
 public sealed record ChatRequest(IReadOnlyList<ChatMessage> Messages, ProviderSettings Settings, string? ApiKey,
-    IReadOnlyList<ToolDefinition>? Tools = null);
+    IReadOnlyList<ToolDefinition>? Tools = null, IReadOnlyList<ImageInput>? Images = null);
 public sealed record StreamEvent(StreamEventKind Kind, string Text = "", int? Tokens = null,
     ModelToolCall? ToolCall = null, ToolResult? ToolResult = null);
 public sealed record AgentRunResult(ChatSession Session, AgentState State, string Content, string Reasoning, int? Tokens = null, string? Error = null);
 public sealed record AgentRunOptions(bool PersistSession = true, string? AdditionalSystemContext = null,
     IReadOnlyList<string>? RelevantPaths = null, string? SystemPrompt = null,
-    bool IncludeLongTermMemory = true, string? ToolSessionScopeId = null);
+    bool IncludeLongTermMemory = true, string? ToolSessionScopeId = null,
+    IReadOnlyList<ImageInput>? Images = null);
 public sealed record IterationGuide(string Id, string Title, string Goal, IReadOnlyList<string> Targets, string Content);
 public sealed record ProposedFileChange(string Path, string OriginalSha256, string OriginalContent, string NewContent);
 public sealed record IterationValidation(bool Success, string BuildOutput, string TestOutput, DateTimeOffset CompletedAt);
@@ -123,6 +126,7 @@ public interface ISessionHistorySearch
 }
 public interface ISettingsStore { Task<AppSettings> LoadAsync(CancellationToken ct = default); Task SaveAsync(AppSettings settings, CancellationToken ct = default); }
 public interface ISecureSecretStore { Task<string?> GetAsync(string providerId, CancellationToken ct = default); Task SetAsync(string providerId, string secret, CancellationToken ct = default); }
+public interface IImageInputService { Task<ImageInput> LoadAsync(string filePath, CancellationToken ct = default); }
 public interface IIterationGuideStore { Task<IReadOnlyList<IterationGuide>> ListAsync(CancellationToken ct = default); }
 public interface ICodeIterationService
 {

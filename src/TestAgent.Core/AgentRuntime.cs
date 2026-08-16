@@ -8,6 +8,7 @@ public sealed class AgentRuntime(IModelProvider provider, IMemoryStore memories,
     {
         if (string.IsNullOrWhiteSpace(userMessage)) throw new ArgumentException("Message is required.", nameof(userMessage));
         options ??= new();
+        ValidateImageRun(settings, options.Images);
         if (!options.PersistSession)
             session = session with { Messages = [.. session.Messages] };
         var now = DateTimeOffset.UtcNow;
@@ -53,14 +54,17 @@ public sealed class AgentRuntime(IModelProvider provider, IMemoryStore memories,
             var recentCalls = new Queue<string>();
             var executedToolCalls = 0;
             var remainingToolOutputBudget = 48_000;
-            const int maxIterations = 8;
+            // Images are resent to stateless chat-completion endpoints after a tool exchange.
+            // Keep that explicitly bounded: three tool rounds plus at most one final no-tool request.
+            var maxIterations = options.Images is { Count: > 0 } ? 3 : 8;
             const int maxToolCallsPerTurn = 8;
             const int maxToolCallsPerRun = 24;
             for (var iteration = 0; iteration < maxIterations; iteration++)
             {
                 var iterationContent = new System.Text.StringBuilder();
                 var calls = new List<ModelToolCall>();
-                await foreach (var item in provider.StreamAsync(new(messages, settings, apiKey, activeToolDefinitions), cancellationToken))
+                await foreach (var item in provider.StreamAsync(new(messages, settings, apiKey, activeToolDefinitions,
+                                   options.Images), cancellationToken))
                 {
                     if (item.Kind == StreamEventKind.Content) { content.Append(item.Text); iterationContent.Append(item.Text); }
                     if (item.Kind == StreamEventKind.Reasoning) reasoning.Append(item.Text);
@@ -114,7 +118,8 @@ public sealed class AgentRuntime(IModelProvider provider, IMemoryStore memories,
                     messages.Add(new(ChatRole.System,
                         $"The bounded tool loop reached {maxIterations} rounds. Do not request more tools. Give the user a concise final answer using only the evidence already present, and clearly state anything still unverified.",
                         DateTimeOffset.UtcNow));
-                    await foreach (var item in provider.StreamAsync(new(messages, settings, apiKey, []), cancellationToken))
+                    await foreach (var item in provider.StreamAsync(new(messages, settings, apiKey, [],
+                                       options.Images), cancellationToken))
                     {
                         if (item.Kind == StreamEventKind.Content) content.Append(item.Text);
                         if (item.Kind == StreamEventKind.Reasoning) reasoning.Append(item.Text);
@@ -124,7 +129,9 @@ public sealed class AgentRuntime(IModelProvider provider, IMemoryStore memories,
                     break;
                 }
             }
-            if (settings.SelfReviewEnabled && settings.MaxSelfReviewRounds > 0 && content.Length > 0)
+            // A text-only reviewer cannot safely revise an answer grounded in an image it did not receive.
+            if (settings.SelfReviewEnabled && settings.MaxSelfReviewRounds > 0 && content.Length > 0 &&
+                options.Images is not { Count: > 0 })
             {
                 string? revised = null;
                 try { revised = await ReviewAnswerAsync(userMessage, content.ToString(), settings, apiKey, cancellationToken); }
@@ -187,6 +194,20 @@ public sealed class AgentRuntime(IModelProvider provider, IMemoryStore memories,
             string.Join("\n", enabled) + "\n</memory-data>", DateTimeOffset.UtcNow));
         result.AddRange(TakeRecentAtomicHistory(history, Math.Max(1, maxMessages)));
         return result;
+    }
+
+    private static void ValidateImageRun(ProviderSettings settings, IReadOnlyList<ImageInput>? images)
+    {
+        if (images is not { Count: > 0 }) return;
+        if (!settings.SupportsImageInput)
+            throw new InvalidOperationException("The selected model is not configured to accept image input.");
+        if (!Uri.TryCreate(settings.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.UserInfo.Length > 0 ||
+            endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0 ||
+            !(endpoint.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+              endpoint.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && endpoint.IsLoopback))
+            throw new InvalidOperationException("Images may only be sent to an HTTPS model endpoint or a loopback HTTP endpoint.");
+        if (images.Count > 4 || images.Sum(x => (long)x.Data.Length) > 20 * 1024 * 1024)
+            throw new InvalidDataException("Image input exceeds the bounded per-request limits.");
     }
 
     private static bool MatchesProjectScope(string scopeId, string path)

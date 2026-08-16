@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TestAgent.Core;
@@ -83,34 +84,129 @@ public sealed class OpenAiCompatibleProvider(HttpClient http) : IModelProvider
 
     private async Task<HttpResponseMessage> OpenWithRetryAsync(ChatRequest request, CancellationToken ct)
     {
+        // A retry would resend the full image after a possibly successful but interrupted upload.
+        // Text requests retain the existing two bounded retries; image requests are attempted once.
+        var maxRetries = request.Images is { Count: > 0 } ? 0 : 2;
         for (var attempt = 0; ; attempt++)
         {
             var message = CreateRequest(request);
             try
             {
                 var response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, ct);
-                if (attempt < 2 && (response.StatusCode == HttpStatusCode.TooManyRequests || response.StatusCode >= HttpStatusCode.InternalServerError))
+                if (attempt < maxRetries && (response.StatusCode == HttpStatusCode.TooManyRequests || response.StatusCode >= HttpStatusCode.InternalServerError))
                 { response.Dispose(); message.Dispose(); await Task.Delay(300 * (attempt + 1), ct); continue; }
                 message.Dispose(); return response;
             }
-            catch (HttpRequestException) when (attempt < 2) { message.Dispose(); await Task.Delay(300 * (attempt + 1), ct); }
+            catch (HttpRequestException) when (attempt < maxRetries) { message.Dispose(); await Task.Delay(300 * (attempt + 1), ct); }
         }
     }
 
     private static HttpRequestMessage CreateRequest(ChatRequest request)
     {
-        var endpoint = request.Settings.Endpoint.TrimEnd('/') + "/chat/completions";
-        var payload = new Dictionary<string, object?>
+        var images = SnapshotImages(request);
+        try
         {
-            ["model"] = request.Settings.Model, ["stream"] = true,
-            ["stream_options"] = new { include_usage = true }, ["max_tokens"] = request.Settings.MaxOutputTokens,
-            ["messages"] = request.Messages.Select(ToWireMessage).ToArray()
-        };
-        if (request.Tools is { Count: > 0 }) payload["tools"] = request.Tools.Select(ToWireTool).ToArray();
-        var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
-        if (!string.IsNullOrWhiteSpace(request.ApiKey)) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.ApiKey);
-        if (request.Settings.ProviderId.Equals("openrouter", StringComparison.OrdinalIgnoreCase)) message.Headers.TryAddWithoutValidation("HTTP-Referer", "https://localhost/testagent");
-        return message;
+            var endpoint = request.Settings.Endpoint.TrimEnd('/') + "/chat/completions";
+            var payload = new Dictionary<string, object?>
+            {
+                ["model"] = request.Settings.Model, ["stream"] = true,
+                ["stream_options"] = new { include_usage = true }, ["max_tokens"] = request.Settings.MaxOutputTokens,
+                ["messages"] = ToWireMessages(request, images)
+            };
+            if (request.Tools is { Count: > 0 }) payload["tools"] = request.Tools.Select(ToWireTool).ToArray();
+            var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
+            if (!string.IsNullOrWhiteSpace(request.ApiKey)) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.ApiKey);
+            if (request.Settings.ProviderId.Equals("openrouter", StringComparison.OrdinalIgnoreCase)) message.Headers.TryAddWithoutValidation("HTTP-Referer", "https://localhost/testagent");
+            return message;
+        }
+        finally
+        {
+            if(images is not null)foreach(var image in images)CryptographicOperations.ZeroMemory(image.Data);
+        }
+    }
+
+    private static object[] ToWireMessages(ChatRequest request, IReadOnlyList<ImageInput>? images)
+    {
+        var imageMessageIndex = -1;
+        if (images is { Count: > 0 })
+            for (var index = request.Messages.Count - 1; index >= 0; index--)
+                if (request.Messages[index].Role == ChatRole.User)
+                {
+                    imageMessageIndex = index;
+                    break;
+                }
+        if (images is { Count: > 0 } && imageMessageIndex < 0)
+            throw new InvalidOperationException("Image input requires a user message.");
+
+        return request.Messages.Select((message, index) => index == imageMessageIndex
+            ? ToWireImageMessage(message, images!)
+            : ToWireMessage(message)).ToArray();
+    }
+
+    private static object ToWireImageMessage(ChatMessage message, IReadOnlyList<ImageInput> images)
+    {
+        var parts = new List<object> { new { type = "text", text = message.Content } };
+        parts.AddRange(images.Select(image => (object)new
+        {
+            type = "image_url",
+            image_url = new
+            {
+                url = $"data:{image.MimeType};base64,{Convert.ToBase64String(image.Data)}",
+                detail = "auto"
+            }
+        }));
+        return new { role = "user", content = parts.ToArray() };
+    }
+
+    private static IReadOnlyList<ImageInput>? SnapshotImages(ChatRequest request)
+    {
+        if (request.Images is not { Count: > 0 } images) return null;
+        if (!request.Settings.SupportsImageInput)
+            throw new InvalidOperationException("The selected model is not configured to accept image input. Enable image support in settings only after confirming the model capability.");
+        if (!Uri.TryCreate(request.Settings.Endpoint, UriKind.Absolute, out var endpoint) ||
+            endpoint.UserInfo.Length > 0 ||
+            endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0 ||
+            !(endpoint.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+              endpoint.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && endpoint.IsLoopback))
+            throw new InvalidOperationException("Images may only be sent to an HTTPS model endpoint or a loopback HTTP endpoint.");
+        if (images.Count > 4) throw new InvalidDataException("At most four images can be sent in one request.");
+        var snapshots = new List<ImageInput>(images.Count);
+        long totalBytes = 0;
+        try
+        {
+            foreach (var image in images)
+            {
+                if (image.MimeType is not ("image/png" or "image/jpeg"))
+                    throw new InvalidDataException("Only sanitized PNG and JPEG image input is supported.");
+                if (image.Data is not { Length: > 0 } || image.Data.Length > ImageInputPreflight.MaxSourceBytes)
+                    throw new InvalidDataException("Each image must be between 1 byte and 10 MB.");
+                var data=image.Data.ToArray();
+                try
+                {
+                    var header=ImageInputPreflight.Inspect(data);
+                    if(!header.MimeType.Equals(image.MimeType,StringComparison.OrdinalIgnoreCase)||header.Width!=image.Width||header.Height!=image.Height)
+                        throw new InvalidDataException("Image type or dimensions do not match the sanitized bytes.");
+                    var actualHash = Convert.ToHexString(SHA256.HashData(data));
+                    if (!actualHash.Equals(image.Sha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Image integrity verification failed.");
+                    totalBytes += data.Length;
+                    snapshots.Add(image with { Data=data });
+                }
+                catch
+                {
+                    CryptographicOperations.ZeroMemory(data);
+                    throw;
+                }
+            }
+            if (totalBytes > 20 * 1024 * 1024)
+                throw new InvalidDataException("Combined image input exceeds 20 MB.");
+            return snapshots;
+        }
+        catch
+        {
+            foreach(var snapshot in snapshots)CryptographicOperations.ZeroMemory(snapshot.Data);
+            throw;
+        }
     }
 
     private static object ToWireMessage(ChatMessage value)

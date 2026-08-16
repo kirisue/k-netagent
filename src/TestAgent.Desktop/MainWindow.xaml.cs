@@ -43,5 +43,24 @@ public partial class MainWindow : Window
         try { await ViewModel.SaveSettingsAsync(ApiKeyBox.Password); }
         catch(Exception ex){MessageBox.Show("设置保存失败："+ex.Message,"K.netagentV0.1",MessageBoxButton.OK,MessageBoxImage.Error);}
     }
+    private async void AttachImage_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.CanAttachImage) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择要发送给模型的图片",
+            Filter = "支持的图片 (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg",
+            Multiselect = false,
+            CheckFileExists = true,
+            AddToRecent = false,
+            DereferenceLinks = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try { await ViewModel.AttachImageAsync(dialog.FileName); }
+        catch(Exception ex)
+        {
+            MessageBox.Show("图片无法使用："+ex.Message,"K.netagentV0.1",MessageBoxButton.OK,MessageBoxImage.Error);
+        }
+    }
     private void PromptBox_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift) { e.Handled = true; if (ViewModel.SendCommand.CanExecute(null)) ViewModel.SendCommand.Execute(null); } }
 }

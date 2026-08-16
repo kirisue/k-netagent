@@ -1,4 +1,5 @@
 using TestAgent.Core;
+using System.Text.Json;
 using Xunit;
 namespace TestAgent.Tests;
 public sealed class AgentRuntimeTests
@@ -41,6 +42,20 @@ public sealed class AgentRuntimeTests
         var result=await runtime.RunAsync(AgentRuntime.NewSession(),"hello",new("custom","http://localhost/v1","fake"),null,observer,CancellationToken.None);
         Assert.Equal(AgentState.Completed,result.State);Assert.Equal("answer",result.Content);Assert.Equal(2,result.Session.Messages.Count);Assert.NotNull(sessions.Value);
     }
+    [Fact] public async Task Runtime_forwards_image_only_to_provider_and_never_persists_image_bytes()
+    {
+        var bytes=new byte[]{9,8,7,6};var image=new ImageInput("image/png",bytes,"HASH",1,1);var provider=new CapturingImageProvider();var sessions=new MemorySessions();
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),sessions,new NoTools());
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"analyze",new("custom","https://model.example/v1","vision",SelfReviewEnabled:true,SupportsImageInput:true),null,new Observer(),CancellationToken.None,new AgentRunOptions(Images:[image]));
+        Assert.Equal(AgentState.Completed,result.State);var request=Assert.Single(provider.Requests);Assert.Same(image,Assert.Single(request.Images!));
+        var persisted=JsonSerializer.Serialize(sessions.Value);Assert.DoesNotContain(Convert.ToBase64String(bytes),persisted);Assert.DoesNotContain("image/png",persisted);
+    }
+    [Fact] public async Task Unsupported_image_is_rejected_before_session_mutation_or_persistence()
+    {
+        var sessions=new MemorySessions();var source=AgentRuntime.NewSession();var runtime=new AgentRuntime(new CapturingImageProvider(),new MemoryMemories(),sessions,new NoTools());
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>runtime.RunAsync(source,"analyze",new("custom","https://model.example/v1","text-only",SupportsImageInput:false),null,new Observer(),CancellationToken.None,new AgentRunOptions(Images:[new("image/png",[1],"HASH",1,1)])));
+        Assert.Empty(source.Messages);Assert.Equal(0,sessions.SaveCount);
+    }
     [Fact] public async Task Self_review_replaces_draft_only_when_reviewer_requests_revision()
     {
         var sessions=new MemorySessions();var runtime=new AgentRuntime(new RevisingProvider(),new MemoryMemories(),sessions,new NoTools());var observer=new Observer();
@@ -58,6 +73,18 @@ public sealed class AgentRuntimeTests
         var provider=new ToolCallingProvider();var tools=new CapturingTools();var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools);
         var result=await runtime.RunAsync(AgentRuntime.NewSession(),"read it",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
         Assert.Equal("final",result.Content);Assert.Single(tools.Requests);Assert.Contains(provider.Requests[1].Messages,x=>x.Role==ChatRole.Tool&&x.ToolCallId=="call-1"&&x.Content.Contains("file contents"));
+    }
+    [Fact] public async Task Runtime_keeps_current_image_available_across_the_bounded_tool_loop()
+    {
+        var image=new ImageInput("image/png",[1],"HASH",1,1);var provider=new ToolCallingProvider();var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),new CapturingTools());
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"inspect image",new("custom","http://localhost/v1","vision",SelfReviewEnabled:false,SupportsImageInput:true),null,new Observer(),CancellationToken.None,new AgentRunOptions(Images:[image]));
+        Assert.Equal(AgentState.Completed,result.State);Assert.Equal(2,provider.Requests.Count);Assert.All(provider.Requests,request=>Assert.Same(image,Assert.Single(request.Images!)));
+    }
+    [Fact] public async Task Image_tool_loop_is_bounded_to_four_model_requests()
+    {
+        var image=new ImageInput("image/png",[1],"HASH",1,1);var provider=new AlwaysToolProvider();var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),new CapturingTools());
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"inspect image",new("custom","http://localhost/v1","vision",SelfReviewEnabled:false,SupportsImageInput:true),null,new Observer(),CancellationToken.None,new AgentRunOptions(Images:[image]));
+        Assert.Equal(AgentState.Completed,result.State);Assert.Equal("bounded final",result.Content);Assert.Equal(4,provider.Requests.Count);Assert.All(provider.Requests,request=>Assert.Same(image,Assert.Single(request.Images!)));
     }
     [Fact] public async Task Scoped_runtime_does_not_persist_or_mutate_source_session_and_passes_allowed_paths()
     {
@@ -90,8 +117,10 @@ public sealed class AgentRuntimeTests
         Assert.Equal(AgentState.Completed,result.State);Assert.Equal(2,tools.Requests.Count);Assert.Contains(provider.Requests.Last().Messages,x=>x.Role==ChatRole.Tool&&x.Content.Contains("repeated identical",StringComparison.OrdinalIgnoreCase));
     }
     private sealed class FakeProvider:IModelProvider{public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){yield return new(StreamEventKind.Reasoning,"think");yield return new(StreamEventKind.Content,"answer");yield return new(StreamEventKind.Usage,Tokens:3);await Task.CompletedTask;}}
+    private sealed class CapturingImageProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);yield return new(StreamEventKind.Content,"image answer");await Task.CompletedTask;}}
     private sealed class RevisingProvider:IModelProvider{private int _calls;public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){_calls++;yield return new(StreamEventKind.Content,_calls==1?"draft":"{\"accept\":false,\"revisedAnswer\":\"better answer\"}");await Task.CompletedTask;}}
     private sealed class ToolCallingProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);if(Requests.Count==1)yield return new(StreamEventKind.Completed,ToolCall:new("call-1","read_file","{\"path\":\"README.md\"}"));else yield return new(StreamEventKind.Content,"final");await Task.CompletedTask;}}
+    private sealed class AlwaysToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);if(r.Tools is {Count:>0})yield return new(StreamEventKind.Completed,ToolCall:new($"call-{Requests.Count}","read_file","{\"path\":\"README.md\"}"));else yield return new(StreamEventKind.Content,"bounded final");await Task.CompletedTask;}}
     private sealed class TwoToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);if(Requests.Count==1){yield return new(StreamEventKind.Completed,ToolCall:new("call-a","read_file","{\"path\":\"README.md\"}"));yield return new(StreamEventKind.Completed,ToolCall:new("call-b","read_file","{\"path\":\"README.md\"}"));}else yield return new(StreamEventKind.Content,"done");await Task.CompletedTask;}}
     private sealed class ReorderedRepeatedToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);var call=Requests.Count switch{1=>new ModelToolCall("one","read_file","{\"path\":\"README.md\",\"startLine\":1}"),2=>new ModelToolCall("two","read_file","{\"startLine\":1,\"path\":\"README.md\"}"),3=>new ModelToolCall("three","read_file","{ \"path\": \"README.md\", \"startLine\": 1 }"),_=>null};if(call is not null)yield return new(StreamEventKind.Completed,ToolCall:call);else yield return new(StreamEventKind.Content,"done");await Task.CompletedTask;}}
     private sealed class MemoryMemories:IMemoryStore{public Task DeleteAsync(string id,CancellationToken c=default)=>Task.CompletedTask;public Task<IReadOnlyList<MemoryEntry>> ListAsync(CancellationToken c=default)=>Task.FromResult<IReadOnlyList<MemoryEntry>>([]);public Task SaveAsync(MemoryEntry m,CancellationToken c=default)=>Task.CompletedTask;}

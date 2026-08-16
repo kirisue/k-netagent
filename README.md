@@ -6,6 +6,8 @@ K.netagentV0.1 是基于 **.NET 10 与 WPF** 开发的 Windows 原生桌面 Agen
 
 > **当前仓库是 K.netagentV0.1 开源版。** 它只公开并展示 K.netagent 完整路线中的核心能力子集，用于验证 Windows 原生 Agent 的架构、交互与安全边界。后续迭代版本将依次使用 `K.netagentV0.2`、`K.netagentV0.3` 等名称。
 
+> `codex/v0.2-iteration` 是本地开发分支，不代表 V0.2 已发布。没有维护者的明确发布命令，不应推送 V0.2 标签或创建 V0.2 Release。
+
 当前阶段优先把一个 Agent 做到可以日常使用：流式对话、跨会话记忆、受控工具、长任务分治、检查点恢复与人工审批。开源版暂不包含多 Agent 调度。
 
 ## 普通用户：双击安装
@@ -86,7 +88,9 @@ dotnet run --project .\src\TestAgent.Desktop\TestAgent.Desktop.csproj
 - 多轮会话、停止生成、清空与新建会话、错误展示、token 用量。
 - 普通 JSON 与 SSE 工具调用兼容，网络错误有界重试。
 
-### 13 个受控工具
+V0.2 开发分支增加本地 PNG/JPEG 图片附件：图片先校验真实格式与 20 MP / 10 MB 上限，再由 Windows 图像组件去元数据重编码。图片只保留在本轮内存中，发送前显示完整目标端点和模型并再次确认；含图请求不自动网络重试，工具循环最多三轮，因此最多四次模型请求会携带同一张图片。路径、文件名、Base64 和像素不会写入会话、记忆或工具审计，但托管内存不承诺法证级擦除。图片能力默认关闭，只有确认具体模型支持后才可启用，并且仅允许不含查询参数的 HTTPS 或本机回环 HTTP 模型端点。图片轮次当前跳过纯文本自审，避免无图审阅器改坏结果。
+
+### 17 个受控工具（V0.2 开发分支）
 
 文件与检索：
 
@@ -109,6 +113,15 @@ dotnet run --project .\src\TestAgent.Desktop\TestAgent.Desktop.csproj
 - `get_background_command`
 - `read_background_output`
 - `stop_background_command`
+
+VS Code 工作区静态理解：
+
+- `get_vscode_workspace_status`
+- `list_vscode_configured_tasks`
+- `list_vscode_extension_recommendations`
+- `get_vscode_docs_link`
+
+VS Code 工具只解析脱敏后的工作区元数据，不返回或执行 `command`、`args`、`env`、`inputs`，也不会安装、更新或删除扩展。`.vscode` 与 `*.code-workspace` 原文对通用文件工具不可见，避免绕过专用解析器。
 
 工具采用 `1 个 Agent 会话 + N 个 ToolSession`。注册多少工具，就为当前聊天或任务建立多少个隔离统计会话；ToolSession 不调用模型、不独立规划，也不是子 Agent。工具超过 12 个时仍会建立全部 ToolSession，但每轮只向模型激活最相关的最多 8 个 schema。
 
@@ -133,7 +146,7 @@ dotnet run --project .\src\TestAgent.Desktop\TestAgent.Desktop.csproj
 
 ### 受控自迭代
 
-- 回答自审：最多一轮；审阅失败时保留原回答。
+- 纯文本回答自审：最多一轮；审阅失败时保留原回答。图片轮次当前跳过自审。
 - 代码自迭代：读取 `iteration-guides/` 白名单提案，在临时副本构建和测试，人工批准后才写入真实源码。
 - 成功记录写入 `iterations/YYYY-MM-DD.md`。
 
@@ -145,7 +158,7 @@ dotnet run --project .\src\TestAgent.Desktop\TestAgent.Desktop.csproj
 - 写文件、启动或停止进程、保存记忆、访问外部网络都需要明确审批。
 - `run_command` 与后台命令只允许可信绝对路径的受限 `dotnet`、`rg` 和只读 `git` 配方。
 - `dotnet build/test/run` 可能执行工作区代码，批准前必须确认代码来源。
-- `fetch_web_content` 只读取公开 HTTPS 静态文本，拒绝私网、凭据 URL、Cookie、跳转、JavaScript 与超限正文。
+- `fetch_web_content` 只读取公开 HTTPS 静态快照，提取有界标题层级与安全链接；拒绝私网、凭据 URL、Cookie、跳转、JavaScript 与超限正文，不执行链接或表单。
 - 工具输出、工作区文件、网页、历史与记忆都按不可信数据回灌，不能替代用户授权。
 - 工具审计位于 `%LOCALAPPDATA%\TestAgent\audit\`，敏感字段会被脱敏。
 
@@ -192,9 +205,9 @@ Inno Setup 只属于维护者的构建工具，普通安装用户不需要安装
 
 - 多 Agent / 子 Agent 调度
 - 交互式 Shell / PTY
-- VS Code 桥接与扩展管理
+- VS Code 实时桥接、Problems 诊断与扩展安装/更新/删除
 - 可点击、可填写表单的浏览器自动化
-- 图像输入、屏幕理解与 GUI 自动化
+- 浏览器视口截图、屏幕理解与 GUI 自动化
 
 这些能力需要独立身份、权限和可见操作边界，不能通过通用 Shell 绕过审批。
 

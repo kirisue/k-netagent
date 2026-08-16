@@ -22,9 +22,11 @@ public partial class App : Application
         services.AddSingleton<ITaskPlanStore, JsonTaskPlanStore>(); services.AddSingleton<IProjectScanner, BoundedProjectScanner>(); services.AddSingleton<ITaskWorkflowService, SingleAgentTaskWorkflowService>();
         services.AddSingleton<IToolSessionStore, JsonToolSessionStore>(); services.AddSingleton<IToolSessionCoordinator, ToolSessionCoordinator>();
         services.AddSingleton<IBackgroundCommandService, BackgroundCommandService>();
+        services.AddSingleton<IImageInputService, WpfImageInputService>();
         services.AddSingleton<WorkspaceLocator>(); services.AddSingleton<IIterationGuideStore, MarkdownIterationGuideStore>(); services.AddSingleton<ICodeIterationService, CodeIterationService>();
         services.AddSingleton<IAgentTool, ListFilesTool>(); services.AddSingleton<IAgentTool, ReadFileTool>(); services.AddSingleton<IAgentTool, SearchTextTool>();
         services.AddSingleton<IAgentTool, EditFileTool>(); services.AddSingleton<IAgentTool, ApplyPatchTool>(); services.AddSingleton<IAgentTool, RunDeveloperCommandTool>(); services.AddSingleton<IAgentTool, SaveMemoryAgentTool>(); services.AddSingleton<IAgentTool, SearchSessionHistoryTool>();
+        services.AddSingleton<IAgentTool, GetVsCodeWorkspaceStatusTool>(); services.AddSingleton<IAgentTool, ListVsCodeConfiguredTasksTool>(); services.AddSingleton<IAgentTool, ListVsCodeExtensionRecommendationsTool>(); services.AddSingleton<IAgentTool, GetVsCodeDocsLinkTool>();
         services.AddSingleton<IAgentTool, StartBackgroundCommandTool>(); services.AddSingleton<IAgentTool, GetBackgroundCommandTool>(); services.AddSingleton<IAgentTool, ReadBackgroundOutputTool>(); services.AddSingleton<IAgentTool, StopBackgroundCommandTool>();
         services.AddHttpClient<ISafeWebContentReader, SafeWebContentReader>(client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -55,7 +57,9 @@ public partial class App : Application
             });
         services.AddSingleton<IAgentTool, FetchWebContentTool>();
         services.AddSingleton<IToolRegistry, ToolRegistry>(); services.AddSingleton<IToolAuditStore, JsonlToolAuditStore>(); services.AddSingleton<IToolExecutionService, ToolExecutionService>();
-        services.AddHttpClient<IModelProvider, OpenAiCompatibleProvider>(); services.AddSingleton<IAgentRuntime>(sp => new AgentRuntime(
+        services.AddHttpClient<IModelProvider, OpenAiCompatibleProvider>()
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
+        services.AddSingleton<IAgentRuntime>(sp => new AgentRuntime(
             sp.GetRequiredService<IModelProvider>(), sp.GetRequiredService<IMemoryStore>(), sp.GetRequiredService<ISessionStore>(),
             sp.GetRequiredService<IToolExecutionService>(), sp.GetRequiredService<IToolSessionCoordinator>()));
         services.AddSingleton<MainViewModel>(); services.AddSingleton<MainWindow>(); _services = services.BuildServiceProvider();

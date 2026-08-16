@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TestAgent.Core;
@@ -99,6 +100,68 @@ public sealed class OpenAiCompatibleProviderTests
         using var doc=JsonDocument.Parse(body!);var function=doc.RootElement.GetProperty("tools")[0].GetProperty("function");Assert.Contains("Example:",function.GetProperty("description").GetString());var path=function.GetProperty("parameters").GetProperty("properties").GetProperty("path");Assert.False(path.TryGetProperty("enum",out _));
     }
 
+    [Fact]
+    public async Task Serializes_sanitized_image_only_in_current_request_content_array()
+    {
+        string? body=null;var bytes=OnePixelPng();var image=new ImageInput("image/png",bytes,Convert.ToHexString(SHA256.HashData(bytes)),1,1);
+        var provider=new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(x=>body=x)));
+        var settings=new ProviderSettings("custom","https://model.example/v1","vision",SelfReviewEnabled:false,SupportsImageInput:true);
+        await foreach(var _ in provider.StreamAsync(new([new(ChatRole.User,"analyze",DateTimeOffset.UtcNow)],settings,null,Images:[image]),CancellationToken.None)){}
+        using var doc=JsonDocument.Parse(body!);var message=doc.RootElement.GetProperty("messages")[0];var content=message.GetProperty("content");
+        Assert.Equal("text",content[0].GetProperty("type").GetString());Assert.Equal("analyze",content[0].GetProperty("text").GetString());
+        var url=content[1].GetProperty("image_url").GetProperty("url").GetString();Assert.Equal("data:image/png;base64,"+Convert.ToBase64String(bytes),url);
+        Assert.DoesNotContain(image.Sha256,body,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("file",body,StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Unsupported_or_insecure_image_input_is_rejected_before_http()
+    {
+        var calls=0;var bytes=new byte[]{1};var image=new ImageInput("image/png",bytes,Convert.ToHexString(SHA256.HashData(bytes)),1,1);
+        var provider=new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(_=>calls++)));
+        async Task ReadAll(ProviderSettings settings){await foreach(var _ in provider.StreamAsync(new([new(ChatRole.User,"x",DateTimeOffset.UtcNow)],settings,null,Images:[image]),CancellationToken.None)){} }
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>ReadAll(new("custom","https://model.example/v1","m",SupportsImageInput:false)));
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>ReadAll(new("custom","http://model.example/v1","m",SupportsImageInput:true)));
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>ReadAll(new("custom","https://model.example/v1?api_key=value","m",SupportsImageInput:true)));
+        Assert.Equal(0,calls);
+    }
+
+    [Fact]
+    public async Task Image_remains_on_user_message_after_a_closed_tool_exchange()
+    {
+        string? body=null;var bytes=OnePixelPng();var image=new ImageInput("image/png",bytes,Convert.ToHexString(SHA256.HashData(bytes)),1,1);var now=DateTimeOffset.UtcNow;
+        var messages=new ChatMessage[]{new(ChatRole.User,"inspect",now),new(ChatRole.Assistant,"",now,ToolCalls:[new("call-1","read_file","{}")]),new(ChatRole.Tool,"result",now,"call-1","read_file")};
+        var provider=new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(x=>body=x)));var settings=new ProviderSettings("custom","https://model.example/v1","vision",SupportsImageInput:true);
+        await foreach(var _ in provider.StreamAsync(new(messages,settings,null,Images:[image]),CancellationToken.None)){}
+        using var document=JsonDocument.Parse(body!);var wire=document.RootElement.GetProperty("messages");
+        Assert.Equal(JsonValueKind.Array,wire[0].GetProperty("content").ValueKind);
+        Assert.Equal("data:image/png;base64,"+Convert.ToBase64String(bytes),wire[0].GetProperty("content")[1].GetProperty("image_url").GetProperty("url").GetString());
+        Assert.Equal("assistant",wire[1].GetProperty("role").GetString());Assert.Equal("call-1",wire[1].GetProperty("tool_calls")[0].GetProperty("id").GetString());
+        Assert.Equal("tool",wire[2].GetProperty("role").GetString());Assert.Equal("call-1",wire[2].GetProperty("tool_call_id").GetString());Assert.Equal(JsonValueKind.String,wire[2].GetProperty("content").ValueKind);
+        Assert.Equal(1,body!.Split("data:image/png;base64,",StringSplitOptions.None).Length-1);
+    }
+
+    [Fact]
+    public async Task Provider_rejects_mime_spoof_and_dimension_mismatch_before_http()
+    {
+        var calls=0;var bytes=OnePixelPng();var settings=new ProviderSettings("custom","https://model.example/v1","vision",SupportsImageInput:true);
+        var provider=new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(_=>calls++)));
+        async Task Read(ImageInput image){await foreach(var _ in provider.StreamAsync(new([new(ChatRole.User,"x",DateTimeOffset.UtcNow)],settings,null,Images:[image]),CancellationToken.None)){} }
+        await Assert.ThrowsAsync<InvalidDataException>(()=>Read(new("image/jpeg",bytes,Convert.ToHexString(SHA256.HashData(bytes)),1,1)));
+        await Assert.ThrowsAsync<InvalidDataException>(()=>Read(new("image/png",bytes,Convert.ToHexString(SHA256.HashData(bytes)),2,1)));
+        Assert.Equal(0,calls);
+    }
+
+    [Fact]
+    public async Task Image_request_is_attempted_once_on_transient_server_failure()
+    {
+        var handler=new StatusHandler(HttpStatusCode.InternalServerError);var bytes=OnePixelPng();
+        var image=new ImageInput("image/png",bytes,Convert.ToHexString(SHA256.HashData(bytes)),1,1);
+        var provider=new OpenAiCompatibleProvider(new HttpClient(handler));
+        async Task Read(){await foreach(var _ in provider.StreamAsync(new([new(ChatRole.User,"x",DateTimeOffset.UtcNow)],new("custom","https://model.example/v1","vision",SupportsImageInput:true),null,Images:[image]),CancellationToken.None)){} }
+        await Assert.ThrowsAsync<HttpRequestException>(Read);
+        Assert.Equal(1,handler.Calls);
+    }
+
     private sealed class Handler(string value,string mediaType="text/event-stream") : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
@@ -106,4 +169,6 @@ public sealed class OpenAiCompatibleProviderTests
                 { Content = new StringContent(value, Encoding.UTF8, mediaType) });
     }
     private sealed class CapturingHandler(Action<string> capture):HttpMessageHandler{protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct){capture(await request.Content!.ReadAsStringAsync(ct));return new(HttpStatusCode.OK){Content=new StringContent("data: [DONE]\n\n",Encoding.UTF8,"text/event-stream")};}}
+    private sealed class StatusHandler(HttpStatusCode status):HttpMessageHandler{public int Calls{get;private set;}protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct){Calls++;return Task.FromResult(new HttpResponseMessage(status){Content=new StringContent("failed")});}}
+    private static byte[] OnePixelPng()=>Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 }

@@ -147,7 +147,7 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
 {
     private static readonly HashSet<string> ProtectedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".git", "bin", "obj", ".ssh", ".aws", ".azure", "credentials", "secrets"
+        ".git", ".vscode", "bin", "obj", ".ssh", ".aws", ".azure", "credentials", "secrets"
     };
     private static readonly HashSet<string> SensitiveFileNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -161,6 +161,7 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
         ".key", ".pem", ".pfx", ".p12", ".keystore"
     };
     protected string Root => workspace.Root;
+    protected virtual bool AllowVsCodeStructuredConfig => false;
     protected string Resolve(ToolRequest request, string? path, bool allowMissing = false)
     {
         path = string.IsNullOrWhiteSpace(path) ? "." : path.Trim();
@@ -207,7 +208,7 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
             throw new InvalidDataException("Path escapes the workspace.");
         var relative = Path.GetRelativePath(Root, fullPath);
         var parts = relative == "." ? [] : relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Any(IsProtectedDirectoryName) || parts.Any(IsSensitiveFileName))
+        if (parts.Any(IsUnavailablePart))
             throw new InvalidDataException("Sensitive or protected paths are not available to tools.");
         EnsureNoReparsePoints(fullPath);
     }
@@ -251,9 +252,18 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
             throw new InvalidDataException("Reparse points and symbolic links are not available to tools.");
     }
     private static bool IsProtectedDirectoryName(string value) => ProtectedDirectoryNames.Contains(value);
+    private bool IsUnavailablePart(string value)
+    {
+        if (AllowVsCodeStructuredConfig &&
+            (value.Equals(".vscode", StringComparison.OrdinalIgnoreCase) ||
+             Path.GetExtension(value).Equals(".code-workspace", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        return IsProtectedDirectoryName(value) || IsSensitiveFileName(value);
+    }
     private static bool IsSensitiveFileName(string value)
     {
-        if (SensitiveFileNames.Contains(value) || value.Equals(".env", StringComparison.OrdinalIgnoreCase) || value.StartsWith(".env.", StringComparison.OrdinalIgnoreCase)) return true;
+        if (SensitiveFileNames.Contains(value) || value.Equals(".env", StringComparison.OrdinalIgnoreCase) || value.StartsWith(".env.", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetExtension(value).Equals(".code-workspace", StringComparison.OrdinalIgnoreCase)) return true;
         var stem = Path.GetFileNameWithoutExtension(value);
         if (stem.Equals("credential", StringComparison.OrdinalIgnoreCase) || stem.Equals("credentials", StringComparison.OrdinalIgnoreCase) ||
             stem.Equals("secret", StringComparison.OrdinalIgnoreCase) || stem.Equals("secrets", StringComparison.OrdinalIgnoreCase) ||
