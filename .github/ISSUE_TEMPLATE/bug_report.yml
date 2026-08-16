@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible K.netagent problem without including secrets or private data.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Do not include API keys, tokens, private chat logs, or sensitive screenshots. Security vulnerabilities must follow SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: For example, K.netagentV0.1 or installer version 0.1.0.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2, win-x64
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the actual and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open ...
+        2. Configure ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted diagnostics
+      description: Paste only diagnostics that you have checked for credentials and personal data.
+      render: text

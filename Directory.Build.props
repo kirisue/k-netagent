@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <Product>K.netagent</Product>
+    <Authors>kirisue</Authors>
+    <Company>kirisue</Company>
+    <Copyright>Copyright © 2026 kirisue</Copyright>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

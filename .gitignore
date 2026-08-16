@@ -1,0 +1,45 @@
+# .NET / build outputs
+**/bin/
+**/obj/
+build/
+dist/
+artifacts/
+publish/
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+*.user
+
+# Local application data and generated iteration records
+memory/
+iterations/*.md
+!iterations/README.md
+*.log
+
+# Secrets and machine-local configuration
+.env
+.env.*
+v4_agent_config.json
+v4_agent_history.json
+.rag_index.json
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+secrets/
+credentials/
+
+# IDE / editor
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+
+# OS and local assistant configuration
+.DS_Store
+Thumbs.db
+.claude/

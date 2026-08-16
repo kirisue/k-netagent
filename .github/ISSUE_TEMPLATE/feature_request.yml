@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a focused improvement for the public single-Agent edition.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful behavior and its user interaction.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and approval impact
+      description: Explain any new filesystem, process, network, browser, credential, or persistence access.
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Single-Agent core
+        - Provider compatibility
+        - Memory and sessions
+        - Tools and task recovery
+        - WPF user interface
+        - Packaging and documentation
+    validations:
+      required: true
