@@ -92,6 +92,12 @@ public sealed class ToolExecutionService(IToolRegistry registry, IToolAuditStore
                 "stop_background_command" => $"Stop background process tree\nJob ID: {Text("jobId")}",
                 "save_memory" => $"Memory name: {Text("name")}\nScope: {Text("scope") switch { "" => "user", var x => x }}\nScope ID: {Text("scopeId") switch { "" => "(default)", var x => Preview(x, 160) }}\nMemory content ({Text("content").Length} chars):\n{Preview(Text("content"))}",
                 "fetch_web_content" => WebApprovalSummary(Text("url")),
+                "open_browser_snapshot" => BrowserOpenApprovalSummary(Text("url")),
+                "capture_browser_viewport" => "SensitiveCapture approval\nCapture the currently visible isolated browser viewport.\nThe viewport may contain private information. Pixel data stays private to the browser session and is transferred to the model only when the user explicitly attaches it to the next turn.",
+                "get_vscode_active_editor" => VsCodeLiveApprovalSummary("active editor metadata"),
+                "get_vscode_diagnostics" => VsCodeLiveApprovalSummary("diagnostic metadata"),
+                "list_vscode_available_tasks" => VsCodeLiveApprovalSummary("fetchTasks metadata; installed task providers may be awakened, but no task will execute"),
+                "list_vscode_installed_extensions" => VsCodeLiveApprovalSummary("installed extension metadata; no extension will be activated, installed, updated, or removed"),
                 _ => RedactArguments(value)
             };
         }
@@ -104,6 +110,18 @@ public sealed class ToolExecutionService(IToolRegistry registry, IToolAuditStore
         var query = string.IsNullOrEmpty(uri.Query) ? "" : "?… (query values hidden)";
         return $"External HTTPS request\nHost: {uri.IdnHost}\nPath: {uri.AbsolutePath}{query}\nNo cookies, credentials, or custom headers will be sent.";
     }
+
+    private static string BrowserOpenApprovalSummary(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return "Open isolated browser snapshot\nInvalid URL (details hidden).";
+        var port = uri.IsDefaultPort ? "" : $":{uri.Port}";
+        var path = uri.AbsolutePath == "/" ? "/" : "/<redacted>";
+        var query = string.IsNullOrEmpty(uri.Query) ? "none" : "present (values hidden)";
+        return $"Open isolated read-only browser snapshot\nOrigin: {uri.Scheme}://{uri.IdnHost}{port}\nPath: {path}\nQuery: {query}\nNo cookies, credentials, scripts, login state, or custom headers will be used.";
+    }
+
+    private static string VsCodeLiveApprovalSummary(string value) =>
+        $"LocalEnvironmentRead approval\nRead bounded {value} from the paired trusted local VS Code workspace.\nNo file text, absolute path, command, arguments, environment values, task execution, write, or extension mutation is permitted.";
 
     private static string EditApprovalSummary(JsonElement root, Func<string, string> text,
         Func<string, int, string> preview)

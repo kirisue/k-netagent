@@ -1,0 +1,56 @@
+{
+  "name": "knetagent-readonly-bridge",
+  "displayName": "K.netagent Read-Only Bridge",
+  "description": "Pairs a trusted local VS Code workspace with K.netagent for explicitly approved metadata reads.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "kirisue",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kirisue/k-netagent.git",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "onCommand:knetagent.pairReadOnlyBridge",
+    "onCommand:knetagent.disconnectReadOnlyBridge"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "knetagent.pairReadOnlyBridge",
+        "title": "K.netagent: Pair Read-Only Bridge"
+      },
+      {
+        "command": "knetagent.disconnectReadOnlyBridge",
+        "title": "K.netagent: Disconnect Read-Only Bridge"
+      }
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "vscode:prepublish": "npm test",
+    "package:vsix": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "3.9.2"
+  }
+}

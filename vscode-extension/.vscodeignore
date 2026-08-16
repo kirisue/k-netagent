@@ -1,0 +1,15 @@
+.gitignore
+.vscodeignore
+node_modules/**
+test/**
+package-lock.json
+*.vsix
+npm-debug.log*
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/**
+credentials/**

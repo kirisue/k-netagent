@@ -1,11 +1,14 @@
-using System.Windows; using System.Windows.Input;
+using System.Security.Cryptography; using System.Text; using System.Text.Json; using System.Windows; using System.Windows.Input; using TestAgent.Infrastructure;
 namespace TestAgent.Desktop;
 public partial class MainWindow : Window
 {
+    private readonly IVsCodeBridgeClient _vsCodeBridge;
+    private PairingClipboardLease? _pairingClipboard;
     public MainViewModel ViewModel { get; }
-    public MainWindow(MainViewModel vm)
+    public MainWindow(MainViewModel vm, WpfReadOnlyBrowserSession browser, IVsCodeBridgeClient vsCodeBridge)
     {
-        InitializeComponent(); ViewModel = vm; DataContext = vm;
+        InitializeComponent(); browser.Attach(SafeBrowserView); ViewModel = vm; DataContext = vm; _vsCodeBridge=vsCodeBridge;
+        _vsCodeBridge.Changed+=VsCodeBridge_Changed;Closed+=MainWindow_Closed;UpdateVsCodeBridgeStatus();
         var backgroundTab = new System.Windows.Controls.TabItem { Header = "后台任务" };
         var panel = new System.Windows.Controls.DockPanel { Margin = new Thickness(8) };
         var toolbar = new System.Windows.Controls.StackPanel();
@@ -24,20 +27,11 @@ public partial class MainWindow : Window
         backgroundTab.Content = panel;
         Loaded += (_, _) =>
         {
-            if (backgroundTab.Parent is null && FindVisualChild<System.Windows.Controls.TabControl>(this) is { } tabs)
-                tabs.Items.Insert(Math.Max(0, tabs.Items.Count - 1), backgroundTab);
+            if (backgroundTab.Parent is null)
+                ManagementTabs.Items.Insert(Math.Max(0, ManagementTabs.Items.Count - 1), backgroundTab);
         };
     }
     private static System.Windows.Controls.Button Button(string text, ICommand command) => new() { Content = text, Command = command, Margin = new Thickness(0, 5, 5, 5) };
-    private static T? FindVisualChild<T>(System.Windows.DependencyObject parent) where T : System.Windows.DependencyObject
-    {
-        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); index++)
-        {
-            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, index); if (child is T value) return value;
-            if (FindVisualChild<T>(child) is { } nested) return nested;
-        }
-        return null;
-    }
     private async void SaveSettings_Click(object sender, RoutedEventArgs e)
     {
         try { await ViewModel.SaveSettingsAsync(ApiKeyBox.Password); }
@@ -62,5 +56,89 @@ public partial class MainWindow : Window
             MessageBox.Show("图片无法使用："+ex.Message,"K.netagentV0.1",MessageBoxButton.OK,MessageBoxImage.Error);
         }
     }
+    private async void CopyVsCodePairing_Click(object sender, RoutedEventArgs e)
+    {
+        byte[]? digest=null;
+        try
+        {
+            var pairingJson=JsonSerializer.Serialize(_vsCodeBridge.GetPairingInfo());
+            digest=HashClipboardText(pairingJson);
+            Clipboard.SetText(pairingJson,TextDataFormat.UnicodeText);
+        }
+        catch
+        {
+            if(digest is not null)CryptographicOperations.ZeroMemory(digest);
+            VsCodeBridgeStatusText.Text="无法访问系统剪贴板；没有复制或显示配对密钥。";
+            return;
+        }
+
+        var lease=new PairingClipboardLease(digest);digest=null;
+        var previous=_pairingClipboard;_pairingClipboard=lease;previous?.Dispose();UpdateVsCodeBridgeStatus();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(75),lease.Token);
+            if(ReferenceEquals(_pairingClipboard,lease))TryClearMatchingPairing(lease.Digest);
+        }
+        catch(OperationCanceledException){ }
+        finally
+        {
+            if(ReferenceEquals(_pairingClipboard,lease))_pairingClipboard=null;
+            lease.Dispose();
+            if(IsLoaded)UpdateVsCodeBridgeStatus();
+        }
+    }
+    private void VsCodeBridge_Changed()
+    {
+        if(Dispatcher.HasShutdownStarted)return;
+        if(Dispatcher.CheckAccess())UpdateVsCodeBridgeStatus();
+        else Dispatcher.BeginInvoke(UpdateVsCodeBridgeStatus);
+    }
+    private void UpdateVsCodeBridgeStatus()
+    {
+        if(_vsCodeBridge.IsConnected&&_pairingClipboard is { } lease)
+        {
+            _pairingClipboard=null;
+            TryClearMatchingPairing(lease.Digest);
+            lease.Dispose();
+        }
+        var connection=_vsCodeBridge.IsConnected
+            ?"已连接到当前用户的本机可信 VS Code 工作区。"
+            :"监听中，等待本机 VS Code 配对；当前没有实时元数据连接。";
+        var clipboard=_pairingClipboard is null?"":"\n配对 JSON 已复制；若未被其他内容替换，将在 75 秒后从剪贴板清除。";
+        VsCodeBridgeStatusText.Text=connection+clipboard;
+    }
+    private void MainWindow_Closed(object? sender,EventArgs e)
+    {
+        _vsCodeBridge.Changed-=VsCodeBridge_Changed;Closed-=MainWindow_Closed;
+        var lease=_pairingClipboard;_pairingClipboard=null;
+        if(lease is null)return;
+        TryClearMatchingPairing(lease.Digest);lease.Dispose();
+    }
+    private static byte[] HashClipboardText(string value)
+    {
+        var bytes=Encoding.UTF8.GetBytes(value);
+        try{return SHA256.HashData(bytes);}
+        finally{CryptographicOperations.ZeroMemory(bytes);}
+    }
+    private static void TryClearMatchingPairing(byte[] expectedDigest)
+    {
+        try
+        {
+            if(!Clipboard.ContainsText(TextDataFormat.UnicodeText))return;
+            var current=Clipboard.GetText(TextDataFormat.UnicodeText);
+            if(current.Length>2_048)return;
+            var actual=HashClipboardText(current);
+            try{if(CryptographicOperations.FixedTimeEquals(actual,expectedDigest))Clipboard.Clear();}
+            finally{CryptographicOperations.ZeroMemory(actual);}
+        }
+        catch{/* Clipboard ownership may change between inspection and clearing; preserve the new owner's content. */}
+    }
     private void PromptBox_KeyDown(object sender, KeyEventArgs e) { if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift) { e.Handled = true; if (ViewModel.SendCommand.CanExecute(null)) ViewModel.SendCommand.Execute(null); } }
+
+    private sealed class PairingClipboardLease(byte[] digest):IDisposable
+    {
+        private readonly CancellationTokenSource _lifetime=new();private bool _disposed;
+        public byte[] Digest{get;}=digest;public CancellationToken Token=>_lifetime.Token;
+        public void Dispose(){if(_disposed)return;_disposed=true;_lifetime.Cancel();_lifetime.Dispose();CryptographicOperations.ZeroMemory(Digest);}
+    }
 }

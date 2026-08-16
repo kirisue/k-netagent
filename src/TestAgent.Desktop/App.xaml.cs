@@ -23,10 +23,13 @@ public partial class App : Application
         services.AddSingleton<IToolSessionStore, JsonToolSessionStore>(); services.AddSingleton<IToolSessionCoordinator, ToolSessionCoordinator>();
         services.AddSingleton<IBackgroundCommandService, BackgroundCommandService>();
         services.AddSingleton<IImageInputService, WpfImageInputService>();
+        services.AddSingleton<IImageSendConfirmationService, WpfImageSendConfirmationService>();
         services.AddSingleton<WorkspaceLocator>(); services.AddSingleton<IIterationGuideStore, MarkdownIterationGuideStore>(); services.AddSingleton<ICodeIterationService, CodeIterationService>();
+        services.AddSingleton<VsCodeBridgeServer>(); services.AddSingleton<IVsCodeBridgeClient>(sp=>sp.GetRequiredService<VsCodeBridgeServer>());
         services.AddSingleton<IAgentTool, ListFilesTool>(); services.AddSingleton<IAgentTool, ReadFileTool>(); services.AddSingleton<IAgentTool, SearchTextTool>();
         services.AddSingleton<IAgentTool, EditFileTool>(); services.AddSingleton<IAgentTool, ApplyPatchTool>(); services.AddSingleton<IAgentTool, RunDeveloperCommandTool>(); services.AddSingleton<IAgentTool, SaveMemoryAgentTool>(); services.AddSingleton<IAgentTool, SearchSessionHistoryTool>();
         services.AddSingleton<IAgentTool, GetVsCodeWorkspaceStatusTool>(); services.AddSingleton<IAgentTool, ListVsCodeConfiguredTasksTool>(); services.AddSingleton<IAgentTool, ListVsCodeExtensionRecommendationsTool>(); services.AddSingleton<IAgentTool, GetVsCodeDocsLinkTool>();
+        services.AddSingleton<IAgentTool, GetVsCodeActiveEditorTool>(); services.AddSingleton<IAgentTool, GetVsCodeDiagnosticsTool>(); services.AddSingleton<IAgentTool, ListVsCodeAvailableTasksTool>(); services.AddSingleton<IAgentTool, ListVsCodeInstalledExtensionsTool>();
         services.AddSingleton<IAgentTool, StartBackgroundCommandTool>(); services.AddSingleton<IAgentTool, GetBackgroundCommandTool>(); services.AddSingleton<IAgentTool, ReadBackgroundOutputTool>(); services.AddSingleton<IAgentTool, StopBackgroundCommandTool>();
         services.AddHttpClient<ISafeWebContentReader, SafeWebContentReader>(client => client.Timeout = TimeSpan.FromSeconds(30))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
@@ -55,7 +58,12 @@ public partial class App : Application
                     throw new HttpRequestException("Could not connect to a validated public web address.", lastError);
                 }
             });
+        services.AddSingleton<WpfReadOnlyBrowserSession>();
+        services.AddSingleton<IReadOnlyBrowserSession>(sp => sp.GetRequiredService<WpfReadOnlyBrowserSession>());
         services.AddSingleton<IAgentTool, FetchWebContentTool>();
+        services.AddSingleton<IAgentTool, OpenBrowserSnapshotTool>();
+        services.AddSingleton<IAgentTool, ReadBrowserDomTool>();
+        services.AddSingleton<IAgentTool, CaptureBrowserViewportTool>();
         services.AddSingleton<IToolRegistry, ToolRegistry>(); services.AddSingleton<IToolAuditStore, JsonlToolAuditStore>(); services.AddSingleton<IToolExecutionService, ToolExecutionService>();
         services.AddHttpClient<IModelProvider, OpenAiCompatibleProvider>()
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
@@ -63,6 +71,7 @@ public partial class App : Application
             sp.GetRequiredService<IModelProvider>(), sp.GetRequiredService<IMemoryStore>(), sp.GetRequiredService<ISessionStore>(),
             sp.GetRequiredService<IToolExecutionService>(), sp.GetRequiredService<IToolSessionCoordinator>()));
         services.AddSingleton<MainViewModel>(); services.AddSingleton<MainWindow>(); _services = services.BuildServiceProvider();
+        await _services.GetRequiredService<IVsCodeBridgeClient>().StartAsync();
         await _services.GetRequiredService<IBackgroundCommandService>().ReconcileAsync();
         var window = _services.GetRequiredService<MainWindow>(); await window.ViewModel.InitializeAsync(); window.Show();
         }

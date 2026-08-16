@@ -15,6 +15,23 @@ public sealed class ToolingTests
         var tool=new FakeTool(ToolRiskLevel.WorkspaceWrite);var audit=new MemoryAudit();var observer=new ApprovalObserver(false);var service=Service(tool,audit);
         var result=await service.ExecuteAsync(new("1","fake","{}","s"),observer);Assert.Equal(ToolExecutionStatus.Blocked,result.Status);Assert.Equal(1,observer.Requests);Assert.False(audit.Items[0].Approved);
     }
+    [Fact] public async Task Browser_open_approval_reveals_origin_but_redacts_path_and_query()
+    {
+        var browser=new ApprovalBrowser();var tool=new OpenBrowserSnapshotTool(browser);var observer=new ApprovalObserver(false);var service=Service(tool,new MemoryAudit());
+        var result=await service.ExecuteAsync(new("browser-open",tool.Definition.Name,"{\"url\":\"https://example.com/private/account?token=SECRET-SENTINEL\"}","s"),observer);
+        Assert.Equal(ToolExecutionStatus.Blocked,result.Status);Assert.NotNull(observer.LastRequest);Assert.Equal(ToolRiskLevel.ExternalNetwork,observer.LastRequest!.RiskLevel);
+        Assert.Contains("https://example.com",observer.LastRequest.Summary);Assert.Contains("/<redacted>",observer.LastRequest.Summary);
+        Assert.DoesNotContain("private",observer.LastRequest.Summary,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("account",observer.LastRequest.Summary,StringComparison.OrdinalIgnoreCase);Assert.DoesNotContain("SECRET-SENTINEL",observer.LastRequest.Summary,StringComparison.Ordinal);
+        Assert.Null(browser.Current);
+    }
+    [Fact] public async Task Browser_capture_approval_names_sensitive_capture_and_private_handoff()
+    {
+        var browser=new ApprovalBrowser();var tool=new CaptureBrowserViewportTool(browser);var observer=new ApprovalObserver(false);var service=Service(tool,new MemoryAudit());
+        var result=await service.ExecuteAsync(new("browser-capture",tool.Definition.Name,"{}","s"),observer);
+        Assert.Equal(ToolExecutionStatus.Blocked,result.Status);Assert.NotNull(observer.LastRequest);Assert.Equal(ToolRiskLevel.SensitiveCapture,observer.LastRequest!.RiskLevel);
+        Assert.Contains("SensitiveCapture",observer.LastRequest.Summary);Assert.Contains("private information",observer.LastRequest.Summary);Assert.Contains("explicitly attaches",observer.LastRequest.Summary);
+        Assert.False(browser.HasLatestCapture);
+    }
     [Fact] public async Task Successful_tool_result_survives_telemetry_failures_without_reexecution()
     {
         var tool=new CountingSuccessTool();var service=new ToolExecutionService(new ToolRegistry([tool]),new ThrowingAudit(),new CompleteFailingToolSessions());
@@ -141,5 +158,13 @@ public sealed class ToolingTests
     private sealed class ThrowingAudit:IToolAuditStore{public Task AppendAsync(ToolAuditEntry e,CancellationToken c=default)=>Task.FromException(new IOException("audit unavailable"));}
     private sealed class MemoryToolSessions:IToolSessionStore{private readonly Dictionary<string,ToolSession> _items=new(StringComparer.OrdinalIgnoreCase);public Task<ToolSession?> GetAsync(string parent,string tool,CancellationToken c=default)=>Task.FromResult(_items.Values.FirstOrDefault(x=>x.ParentSessionId==parent&&x.ToolName.Equals(tool,StringComparison.OrdinalIgnoreCase)));public Task<IReadOnlyList<ToolSession>> ListAsync(string? parent=null,CancellationToken c=default)=>Task.FromResult<IReadOnlyList<ToolSession>>(_items.Values.Where(x=>parent is null||x.ParentSessionId==parent).ToArray());public Task SaveAsync(ToolSession s,CancellationToken c=default){_items[s.Id]=s;return Task.CompletedTask;}}
     private sealed class CompleteFailingToolSessions:IToolSessionCoordinator{public Task<IReadOnlyList<ToolSession>> EnsureSessionsAsync(string p,IReadOnlyList<ToolDefinition>d,CancellationToken c=default)=>Task.FromResult<IReadOnlyList<ToolSession>>([]);public Task<ToolSession> StartAsync(ToolRequest r,bool a,CancellationToken c=default)=>Task.FromResult(new ToolSession("tool","chat",r.Name,ToolSessionState.Running,0,0,0,null,[],DateTimeOffset.UtcNow,DateTimeOffset.UtcNow));public Task<ToolSession> CompleteAsync(ToolSession s,ToolRequest r,ToolResult x,bool a,CancellationToken c=default)=>Task.FromException<ToolSession>(new IOException("session unavailable"));public Task<string?> GetStrategyHintAsync(string p,string n,CancellationToken c=default)=>Task.FromResult<string?>(null);public Task<IReadOnlyList<ToolSession>> ListAsync(string? p=null,CancellationToken c=default)=>Task.FromResult<IReadOnlyList<ToolSession>>([]);public Task<ToolSession>AcknowledgeNeedsReviewAsync(string p,string n,CancellationToken c=default)=>Task.FromException<ToolSession>(new IOException("unavailable"));}
-    private sealed class ApprovalObserver(bool approve):IAgentObserver{public int Requests;public ValueTask OnEventAsync(StreamEvent v)=>ValueTask.CompletedTask;public ValueTask OnStateAsync(AgentState s)=>ValueTask.CompletedTask;public ValueTask<bool> RequestToolApprovalAsync(ToolApprovalRequest r,CancellationToken c){Requests++;return ValueTask.FromResult(approve);}}
+    private sealed class ApprovalObserver(bool approve):IAgentObserver{public int Requests;public ToolApprovalRequest? LastRequest;public ValueTask OnEventAsync(StreamEvent v)=>ValueTask.CompletedTask;public ValueTask OnStateAsync(AgentState s)=>ValueTask.CompletedTask;public ValueTask<bool> RequestToolApprovalAsync(ToolApprovalRequest r,CancellationToken c){Requests++;LastRequest=r;return ValueTask.FromResult(approve);}}
+    private sealed class ApprovalBrowser:IReadOnlyBrowserSession
+    {
+        public BrowserPageDocument? Current=>null;public bool HasLatestCapture=>false;public event Action? Changed{add{} remove{}}
+        public Task<BrowserPageDocument> OpenSnapshotAsync(string url,int maxChars=30000,CancellationToken ct=default)=>throw new InvalidOperationException("Rejected requests must not navigate.");
+        public Task<BrowserDomSnapshot> ReadDomAsync(int maxChars=30000,CancellationToken ct=default)=>throw new InvalidOperationException();
+        public Task<BrowserCaptureReceipt> CaptureViewportAsync(CancellationToken ct=default)=>throw new InvalidOperationException("Rejected requests must not capture.");
+        public ImageInput? TakeLatestCapture()=>null;
+    }
 }

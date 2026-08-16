@@ -15,9 +15,14 @@ public static class ToolSelectionPolicy
         var groups = new[]
         {
             Group(0,["后台","异步","持续运行","background","async","long running"],["start_background_command","get_background_command","read_background_output","stop_background_command"],atomic:true),
+            Group(0,["当前编辑器","活动编辑器","光标位置","可见行","active editor","current editor","selection"],["get_vscode_active_editor"]),
+            Group(0,["诊断","问题面板","错误列表","diagnostic","diagnostics","problems"],["get_vscode_diagnostics"]),
+            Group(0,["可用任务","实时任务","任务提供器","available tasks","fetchtasks","task provider"],["list_vscode_available_tasks"]),
+            Group(0,["已安装扩展","扩展清单","installed extension","installed extensions","extension list"],["list_vscode_installed_extensions"]),
             Group(1,["vs code","vscode",".vscode","tasks.json","工作区任务","workspace task"],["get_vscode_workspace_status","list_vscode_configured_tasks"]),
             Group(2,["vs code 扩展","vscode extension","extensions.json","扩展建议","扩展推荐","extension recommendation"],["list_vscode_extension_recommendations"]),
             Group(3,["vs code api","vscode api","vs code 文档","vscode docs","官方文档"],["get_vscode_docs_link"]),
+            Group(4,["网页","网站","页面","浏览器","导航","链接","http","url","web","browser"],["open_browser_snapshot","read_browser_dom","capture_browser_viewport"],atomic:true),
             Group(4,["网页","网站","页面","浏览器","导航","链接","http","url","web","browser","api docs"],["fetch_web_content"]),
             Group(5,["记忆","记住","历史","以前","memory","history"],["save_memory","search_session_history"]),
             Group(6,["修改","编辑","修复","代码","文件","implement","edit","patch","fix","code"],["edit_file","apply_patch"]),

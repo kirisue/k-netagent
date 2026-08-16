@@ -15,6 +15,7 @@ public sealed class AppPaths
     public string Audit => Path.Combine(Root, "audit");
     public string Tasks => Path.Combine(Root, "tasks");
     public string ToolSessions => Path.Combine(Root, "tool-sessions");
+    public string BrowserProfile => Path.Combine(Root, "browser-profile");
 }
 
 public abstract class JsonDirectoryStore<T>(string directory)

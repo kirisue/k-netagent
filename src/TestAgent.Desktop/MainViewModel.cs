@@ -1,29 +1,38 @@
-using System.Collections.ObjectModel; using System.ComponentModel; using System.IO; using System.Runtime.CompilerServices; using System.Security.Cryptography; using System.Windows; using System.Windows.Input; using System.Windows.Media; using System.Windows.Media.Imaging; using TestAgent.Core; using TestAgent.Infrastructure;
+using System.Collections.ObjectModel; using System.ComponentModel; using System.IO; using System.Runtime.CompilerServices; using System.Security.Cryptography; using System.Text.Json; using System.Windows; using System.Windows.Input; using System.Windows.Media; using System.Windows.Media.Imaging; using TestAgent.Core; using TestAgent.Infrastructure;
 namespace TestAgent.Desktop;
-public sealed class MainViewModel : NotifyBase, IAgentObserver
+public sealed class MainViewModel : NotifyBase, IAgentObserver, IDisposable
 {
-    private readonly IAgentRuntime _agent; private readonly ISessionStore _sessions; private readonly IMemoryStore _memories; private readonly ISettingsStore _settings; private readonly ISecureSecretStore _secrets; private readonly IIterationGuideStore _iterationGuideStore; private readonly ICodeIterationService _iterationService; private readonly ITaskWorkflowService _taskWorkflow; private readonly IToolSessionCoordinator _toolSessions; private readonly IToolRegistry _toolRegistry; private readonly IBackgroundCommandService _backgroundCommands; private readonly IImageInputService _imageInputs; private CancellationTokenSource? _runCts; private AppSettings _appSettings = null!; private ImageInput? _pendingImage;
+    private readonly IAgentRuntime _agent; private readonly ISessionStore _sessions; private readonly IMemoryStore _memories; private readonly ISettingsStore _settings; private readonly ISecureSecretStore _secrets; private readonly IIterationGuideStore _iterationGuideStore; private readonly ICodeIterationService _iterationService; private readonly ITaskWorkflowService _taskWorkflow; private readonly IToolSessionCoordinator _toolSessions; private readonly IToolRegistry _toolRegistry; private readonly IToolExecutionService _toolExecution; private readonly IBackgroundCommandService _backgroundCommands; private readonly IImageInputService _imageInputs; private readonly IImageSendConfirmationService _imageConfirmation; private readonly IReadOnlyBrowserSession _browser; private CancellationTokenSource? _runCts; private AppSettings _appSettings = null!; private ImageInput? _pendingImage; private bool _disposed;
     public ObservableCollection<ChatSession> Sessions { get; }=[]; public ObservableCollection<ChatMessage> Messages { get; }=[]; public ObservableCollection<MemoryEntry> Memories { get; }=[];
     public ObservableCollection<IterationGuide> IterationGuides { get; }=[];
     public ObservableCollection<TaskWorkflowItem> TaskWorkflows { get; }=[]; public ObservableCollection<TaskNodeDisplay> TaskNodes { get; }=[];
     public ObservableCollection<ToolSessionDisplay> ToolSessions{get;}=[];
     public ObservableCollection<BackgroundCommandJob> BackgroundCommands{get;}=[];
     public string[] ProviderIds { get; }=["deepseek","openai","openrouter","ollama","custom"];
-    private ChatSession? _selectedSession; public ChatSession? SelectedSession { get=>_selectedSession; set { if(Set(ref _selectedSession,value)){SyncMessages();_ = RefreshToolSessionsAsync();} } }
+    private ChatSession? _selectedSession; public ChatSession? SelectedSession { get=>_selectedSession; set { if(Set(ref _selectedSession,value)){SyncMessages();_ = RefreshToolSessionsAsync();CommandsChanged();} } }
     private MemoryEntry? _selectedMemory; public MemoryEntry? SelectedMemory { get=>_selectedMemory; set { Set(ref _selectedMemory,value); if(value is not null){MemoryName=value.Name;MemoryContent=value.Content;MemoryEnabled=value.Enabled;MemoryScope=value.Scope;MemoryScopeId=value.ScopeId??"";} } }
     private string _input=""; public string Input { get=>_input;set {if(Set(ref _input,value))CommandsChanged();} } private string _reasoning=""; public string Reasoning { get=>_reasoning;set {Set(ref _reasoning,value); OnPropertyChanged(nameof(HasReasoning));} } public bool HasReasoning=>!string.IsNullOrWhiteSpace(Reasoning);
-    private string _attachedImageSummary=""; private ImageSource? _attachedImagePreview; private bool _imageLoading; public string AttachedImageSummary{get=>_attachedImageSummary;private set=>Set(ref _attachedImageSummary,value);} public ImageSource? AttachedImagePreview{get=>_attachedImagePreview;private set=>Set(ref _attachedImagePreview,value);} public bool HasAttachedImage=>_pendingImage is not null; public bool CanAttachImage=>!Busy&&!_imageLoading;
+    private string _attachedImageSummary=""; private ImageSource? _attachedImagePreview; private bool _imageLoading; public string AttachedImageSummary{get=>_attachedImageSummary;private set=>Set(ref _attachedImageSummary,value);} public ImageSource? AttachedImagePreview{get=>_attachedImagePreview;private set=>Set(ref _attachedImagePreview,value);} public bool HasAttachedImage=>_pendingImage is not null; public bool CanAttachImage=>!Busy&&!_imageLoading&&!_disposed;
     private string _streamingContent=""; public string StreamingContent { get=>_streamingContent; set { Set(ref _streamingContent,value); OnPropertyChanged(nameof(HasStreamingContent)); } } public bool HasStreamingContent=>!string.IsNullOrWhiteSpace(StreamingContent);
     private string _status="就绪"; public string Status {get=>_status;set=>Set(ref _status,value);} private string _toolSessionStatus="工具会话尚未初始化"; public string ToolSessionStatus{get=>_toolSessionStatus;set=>Set(ref _toolSessionStatus,value);} private bool _busy; public bool Busy {get=>_busy;set {if(Set(ref _busy,value)){OnPropertyChanged(nameof(CanAttachImage));CommandsChanged();}}}
     private BackgroundCommandJob? _selectedBackgroundCommand; private string _backgroundOutput="",_backgroundStatus="后台命令尚未刷新"; private long _backgroundCursor; public BackgroundCommandJob? SelectedBackgroundCommand{get=>_selectedBackgroundCommand;set{var changedId=!string.Equals(_selectedBackgroundCommand?.Id,value?.Id,StringComparison.OrdinalIgnoreCase);if(Set(ref _selectedBackgroundCommand,value)){if(changedId){BackgroundOutput="";_backgroundCursor=0;}CommandsChanged();}}} public string BackgroundOutput{get=>_backgroundOutput;set=>Set(ref _backgroundOutput,value);} public string BackgroundStatus{get=>_backgroundStatus;set=>Set(ref _backgroundStatus,value);}
+    private string _browserAddress="https://example.com/",_browserStatus="只读浏览器尚未打开页面",_browserDomPreview=""; private int _centerTabIndex;
+    public string BrowserAddress{get=>_browserAddress;set{if(Set(ref _browserAddress,value))CommandsChanged();}} public string BrowserStatus{get=>_browserStatus;private set=>Set(ref _browserStatus,value);} public string BrowserDomPreview{get=>_browserDomPreview;private set{Set(ref _browserDomPreview,value);OnPropertyChanged(nameof(HasBrowserDomPreview));}} public bool HasBrowserDomPreview=>!string.IsNullOrWhiteSpace(BrowserDomPreview); public bool BrowserHasPage=>_browser.Current is not null; public bool BrowserHasCapture=>_browser.HasLatestCapture; public string BrowserPageSummary=>_browser.Current is { } page?$"{page.Title}\n{page.Url}":"公开 HTTPS 页面会先被净化为本地只读快照；不会加载远程 HTML、Cookie 或脚本。"; public int CenterTabIndex{get=>_centerTabIndex;set=>Set(ref _centerTabIndex,value);}
     private string _providerId="deepseek",_endpoint="",_model=""; private int _maxTokens=4096,_timeoutSeconds=120; private bool _selfReviewEnabled=true,_supportsImageInput; public string ProviderId {get=>_providerId;set {if(Set(ref _providerId,value)){SupportsImageInput=false;ApplyPreset();}}} public string Endpoint {get=>_endpoint;set{if(Set(ref _endpoint,value))SupportsImageInput=false;}} public string Model {get=>_model;set{if(Set(ref _model,value))SupportsImageInput=false;}} public int MaxTokens {get=>_maxTokens;set=>Set(ref _maxTokens,value);} public int TimeoutSeconds {get=>_timeoutSeconds;set=>Set(ref _timeoutSeconds,value);} public bool SelfReviewEnabled {get=>_selfReviewEnabled;set=>Set(ref _selfReviewEnabled,value);} public bool SupportsImageInput{get=>_supportsImageInput;set=>Set(ref _supportsImageInput,value);}
     private string _memoryName="",_memoryContent=""; private bool _memoryEnabled=true; private MemoryScope _memoryScope=TestAgent.Core.MemoryScope.User; private string _memoryScopeId=""; public MemoryScope[] MemoryScopes{get;}=Enum.GetValues<MemoryScope>(); public string MemoryName{get=>_memoryName;set=>Set(ref _memoryName,value);} public string MemoryContent{get=>_memoryContent;set=>Set(ref _memoryContent,value);} public bool MemoryEnabled{get=>_memoryEnabled;set=>Set(ref _memoryEnabled,value);} public MemoryScope MemoryScope{get=>_memoryScope;set=>Set(ref _memoryScope,value);} public string MemoryScopeId{get=>_memoryScopeId;set=>Set(ref _memoryScopeId,value);}
     private IterationGuide? _selectedIterationGuide; private IterationProposal? _iterationProposal; private string _iterationSummary="",_iterationFiles="",_iterationValidation="",_iterationPreview=""; private bool _iterationApproved;
     private TaskWorkflowItem? _selectedTaskWorkflow; private string _taskGoal="",_taskSummary=""; private bool _taskPlanApproved;
     public TaskWorkflowItem? SelectedTaskWorkflow{get=>_selectedTaskWorkflow;set{if(Set(ref _selectedTaskWorkflow,value)){TaskPlanApproved=false;SyncTaskNodes();CommandsChanged();}}} public string TaskGoal{get=>_taskGoal;set{Set(ref _taskGoal,value);CommandsChanged();}} public string TaskSummary{get=>_taskSummary;set=>Set(ref _taskSummary,value);} public bool TaskPlanApproved{get=>_taskPlanApproved;set{Set(ref _taskPlanApproved,value);CommandsChanged();}}
     public IterationGuide? SelectedIterationGuide {get=>_selectedIterationGuide;set {Set(ref _selectedIterationGuide,value);IterationApproved=false;CommandsChanged();}} public string IterationSummary {get=>_iterationSummary;set=>Set(ref _iterationSummary,value);} public string IterationFiles {get=>_iterationFiles;set=>Set(ref _iterationFiles,value);} public string IterationValidation {get=>_iterationValidation;set=>Set(ref _iterationValidation,value);} public string IterationPreview {get=>_iterationPreview;set=>Set(ref _iterationPreview,value);} public bool IterationApproved {get=>_iterationApproved;set {Set(ref _iterationApproved,value);CommandsChanged();}}
-    public ICommand SendCommand {get;} public ICommand StopCommand {get;} public ICommand NewSessionCommand {get;} public ICommand ClearSessionCommand {get;} public ICommand ClearImageCommand{get;} public ICommand SaveMemoryCommand {get;} public ICommand DeleteMemoryCommand {get;} public ICommand GenerateIterationCommand {get;} public ICommand ApplyIterationCommand {get;} public ICommand CreateTaskPlanCommand{get;} public ICommand RunTaskPlanCommand{get;} public ICommand RefreshTaskPlansCommand{get;} public ICommand ReviewAndRetryTaskCommand{get;} public ICommand RefreshToolSessionsCommand{get;} public ICommand AcknowledgeToolSessionsCommand{get;} public ICommand RefreshBackgroundCommandsCommand{get;} public ICommand ReadBackgroundOutputCommand{get;} public ICommand StopBackgroundCommandCommand{get;}
-    public MainViewModel(IAgentRuntime agent,ISessionStore sessions,IMemoryStore memories,ISettingsStore settings,ISecureSecretStore secrets,IIterationGuideStore iterationGuideStore,ICodeIterationService iterationService,ITaskWorkflowService taskWorkflow,IToolSessionCoordinator toolSessions,IToolRegistry toolRegistry,IBackgroundCommandService backgroundCommands,IImageInputService imageInputs){_agent=agent;_sessions=sessions;_memories=memories;_settings=settings;_secrets=secrets;_iterationGuideStore=iterationGuideStore;_iterationService=iterationService;_taskWorkflow=taskWorkflow;_toolSessions=toolSessions;_toolRegistry=toolRegistry;_backgroundCommands=backgroundCommands;_imageInputs=imageInputs;SendCommand=new AsyncCommand(SendAsync,()=>!Busy&&!_imageLoading&&(!string.IsNullOrWhiteSpace(Input)||HasAttachedImage));StopCommand=new RelayCommand(()=>_runCts?.Cancel(),()=>Busy);NewSessionCommand=new AsyncCommand(NewSessionAsync,()=>!Busy);ClearSessionCommand=new AsyncCommand(ClearSessionAsync,()=>!Busy&&SelectedSession is not null);ClearImageCommand=new RelayCommand(ClearAttachedImage,()=>!Busy&&!_imageLoading&&HasAttachedImage);SaveMemoryCommand=new AsyncCommand(SaveMemoryAsync);DeleteMemoryCommand=new AsyncCommand(DeleteMemoryAsync,()=>SelectedMemory is not null);GenerateIterationCommand=new AsyncCommand(GenerateIterationAsync,()=>!Busy&&SelectedIterationGuide is not null);ApplyIterationCommand=new AsyncCommand(ApplyIterationAsync,()=>!Busy&&IterationApproved&&_iterationProposal?.Validation.Success==true);CreateTaskPlanCommand=new AsyncCommand(CreateTaskPlanAsync,()=>!Busy&&!string.IsNullOrWhiteSpace(TaskGoal));RunTaskPlanCommand=new AsyncCommand(RunTaskPlanAsync,()=>!Busy&&TaskPlanApproved&&SelectedTaskWorkflow is not null&&SelectedTaskWorkflow.Status is not (TaskGraphStatus.Completed or TaskGraphStatus.NeedsReview));RefreshTaskPlansCommand=new AsyncCommand(()=>RefreshTaskPlansAsync(),()=>!Busy);ReviewAndRetryTaskCommand=new AsyncCommand(ReviewAndRetryTaskAsync,()=>!Busy&&TaskPlanApproved&&SelectedTaskWorkflow?.Status==TaskGraphStatus.NeedsReview);RefreshToolSessionsCommand=new AsyncCommand(RefreshToolSessionsAsync,()=>!Busy);AcknowledgeToolSessionsCommand=new AsyncCommand(AcknowledgeToolSessionsAsync,()=>!Busy&&ToolSessions.Any(x=>x.State==ToolSessionState.NeedsReview));RefreshBackgroundCommandsCommand=new AsyncCommand(RefreshBackgroundCommandsAsync);ReadBackgroundOutputCommand=new AsyncCommand(ReadBackgroundOutputAsync,()=>SelectedBackgroundCommand is not null);StopBackgroundCommandCommand=new AsyncCommand(StopBackgroundCommandAsync,()=>SelectedBackgroundCommand?.State is BackgroundCommandState.Running or BackgroundCommandState.Starting or BackgroundCommandState.Stopping or BackgroundCommandState.NeedsReview);}
+    public ICommand SendCommand {get;} public ICommand StopCommand {get;} public ICommand NewSessionCommand {get;} public ICommand ClearSessionCommand {get;} public ICommand ClearImageCommand{get;} public ICommand OpenBrowserSnapshotCommand{get;} public ICommand ReadBrowserDomCommand{get;} public ICommand CaptureBrowserViewportCommand{get;} public ICommand AttachBrowserCaptureCommand{get;} public ICommand SaveMemoryCommand {get;} public ICommand DeleteMemoryCommand {get;} public ICommand GenerateIterationCommand {get;} public ICommand ApplyIterationCommand {get;} public ICommand CreateTaskPlanCommand{get;} public ICommand RunTaskPlanCommand{get;} public ICommand RefreshTaskPlansCommand{get;} public ICommand ReviewAndRetryTaskCommand{get;} public ICommand RefreshToolSessionsCommand{get;} public ICommand AcknowledgeToolSessionsCommand{get;} public ICommand RefreshBackgroundCommandsCommand{get;} public ICommand ReadBackgroundOutputCommand{get;} public ICommand StopBackgroundCommandCommand{get;}
+    public MainViewModel(IAgentRuntime agent,ISessionStore sessions,IMemoryStore memories,ISettingsStore settings,ISecureSecretStore secrets,IIterationGuideStore iterationGuideStore,ICodeIterationService iterationService,ITaskWorkflowService taskWorkflow,IToolSessionCoordinator toolSessions,IToolRegistry toolRegistry,IBackgroundCommandService backgroundCommands,IImageInputService imageInputs,IImageSendConfirmationService imageConfirmation,IReadOnlyBrowserSession browser,IToolExecutionService toolExecution)
+    {
+        _agent=agent;_sessions=sessions;_memories=memories;_settings=settings;_secrets=secrets;_iterationGuideStore=iterationGuideStore;_iterationService=iterationService;_taskWorkflow=taskWorkflow;_toolSessions=toolSessions;_toolRegistry=toolRegistry;_backgroundCommands=backgroundCommands;_imageInputs=imageInputs;_imageConfirmation=imageConfirmation;_browser=browser;_toolExecution=toolExecution;
+        _browser.Changed+=OnBrowserChanged;
+        SendCommand=new AsyncCommand(SendAsync,()=>!_disposed&&!Busy&&!_imageLoading&&SelectedSession is not null&&(!string.IsNullOrWhiteSpace(Input)||HasAttachedImage));StopCommand=new RelayCommand(()=>_runCts?.Cancel(),()=>!_disposed&&Busy);NewSessionCommand=new AsyncCommand(NewSessionAsync,()=>!_disposed&&!Busy);ClearSessionCommand=new AsyncCommand(ClearSessionAsync,()=>!_disposed&&!Busy&&SelectedSession is not null);ClearImageCommand=new RelayCommand(ClearAttachedImage,()=>!_disposed&&!Busy&&!_imageLoading&&HasAttachedImage);
+        OpenBrowserSnapshotCommand=new AsyncCommand(OpenBrowserSnapshotAsync,()=>!_disposed&&!Busy&&!_imageLoading&&SelectedSession is not null&&!string.IsNullOrWhiteSpace(BrowserAddress));ReadBrowserDomCommand=new AsyncCommand(ReadBrowserDomAsync,()=>!_disposed&&!Busy&&!_imageLoading&&SelectedSession is not null&&BrowserHasPage);CaptureBrowserViewportCommand=new AsyncCommand(CaptureBrowserViewportAsync,()=>!_disposed&&!Busy&&!_imageLoading&&SelectedSession is not null&&BrowserHasPage);AttachBrowserCaptureCommand=new RelayCommand(AttachBrowserCapture,()=>!_disposed&&!Busy&&!_imageLoading&&BrowserHasCapture);
+        SaveMemoryCommand=new AsyncCommand(SaveMemoryAsync);DeleteMemoryCommand=new AsyncCommand(DeleteMemoryAsync,()=>SelectedMemory is not null);GenerateIterationCommand=new AsyncCommand(GenerateIterationAsync,()=>!Busy&&SelectedIterationGuide is not null);ApplyIterationCommand=new AsyncCommand(ApplyIterationAsync,()=>!Busy&&IterationApproved&&_iterationProposal?.Validation.Success==true);CreateTaskPlanCommand=new AsyncCommand(CreateTaskPlanAsync,()=>!Busy&&!string.IsNullOrWhiteSpace(TaskGoal));RunTaskPlanCommand=new AsyncCommand(RunTaskPlanAsync,()=>!Busy&&TaskPlanApproved&&SelectedTaskWorkflow is not null&&SelectedTaskWorkflow.Status is not (TaskGraphStatus.Completed or TaskGraphStatus.NeedsReview));RefreshTaskPlansCommand=new AsyncCommand(()=>RefreshTaskPlansAsync(),()=>!Busy);ReviewAndRetryTaskCommand=new AsyncCommand(ReviewAndRetryTaskAsync,()=>!Busy&&TaskPlanApproved&&SelectedTaskWorkflow?.Status==TaskGraphStatus.NeedsReview);RefreshToolSessionsCommand=new AsyncCommand(RefreshToolSessionsAsync,()=>!Busy);AcknowledgeToolSessionsCommand=new AsyncCommand(AcknowledgeToolSessionsAsync,()=>!Busy&&ToolSessions.Any(x=>x.State==ToolSessionState.NeedsReview));RefreshBackgroundCommandsCommand=new AsyncCommand(RefreshBackgroundCommandsAsync);ReadBackgroundOutputCommand=new AsyncCommand(ReadBackgroundOutputAsync,()=>SelectedBackgroundCommand is not null);StopBackgroundCommandCommand=new AsyncCommand(StopBackgroundCommandAsync,()=>SelectedBackgroundCommand?.State is BackgroundCommandState.Running or BackgroundCommandState.Starting or BackgroundCommandState.Stopping or BackgroundCommandState.NeedsReview);
+    }
     public async Task InitializeAsync(){_appSettings=await _settings.LoadAsync();ProviderId=_appSettings.Provider.ProviderId;Endpoint=_appSettings.Provider.Endpoint;Model=_appSettings.Provider.Model;MaxTokens=_appSettings.Provider.MaxOutputTokens;TimeoutSeconds=_appSettings.Provider.TimeoutSeconds;SelfReviewEnabled=_appSettings.Provider.SelfReviewEnabled;SupportsImageInput=_appSettings.Provider.SupportsImageInput;await RefreshSessions();await RefreshMemories();await RefreshIterationGuides();await RefreshTaskPlansAsync();if(SelectedSession is null)await NewSessionAsync();await RefreshToolSessionsAsync();await RefreshBackgroundCommandsAsync();}
     public async Task SaveSettingsAsync(string key){_appSettings=new(new ProviderSettings(ProviderId,Endpoint,Model,MaxTokens,TimeoutSeconds,30,SelfReviewEnabled,SupportsImageInput:SupportsImageInput),_appSettings.SystemPrompt);await _settings.SaveAsync(_appSettings);if(!string.IsNullOrWhiteSpace(key))await _secrets.SetAsync(ProviderId,key);Status="设置已安全保存";}
     private async Task SendAsync()
@@ -40,8 +49,7 @@ public sealed class MainViewModel : NotifyBase, IAgentObserver
                  endpoint.Scheme.Equals(Uri.UriSchemeHttp,StringComparison.OrdinalIgnoreCase)&&endpoint.IsLoopback))
             {Status="图片只能发送到不含查询参数的 HTTPS 模型端点或本机回环 HTTP 端点。";return;}
             var target=endpoint.GetLeftPart(UriPartial.Path).TrimEnd('/')+"/chat/completions";
-            var confirm=MessageBox.Show($"将把当前图片的可见像素发送到：\n{target}\n\n模型：{providerSettings.Model}\n尺寸：{image.Width}×{image.Height}\n大小：{image.Data.Length/1024d:F1} KB\n\n同一轮如需调用工具，最多四次模型请求会携带这张图片；含图请求不会自动网络重试。图片路径、文件名和元数据不会写入会话。继续？","发送图片",MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No);
-            if(confirm!=MessageBoxResult.Yes)return;
+            if(!_imageConfirmation.Confirm(new(target,providerSettings.Model,image.Width,image.Height,image.Data.Length,4)))return;
         }
         var text=string.IsNullOrWhiteSpace(Input)?"请分析这张图片并说明你看到的重要信息。":Input.Trim();
         if(image is not null)text+="\n\n[本轮附带 1 张图片；图片像素不会保存到本地会话。]";
@@ -59,6 +67,52 @@ public sealed class MainViewModel : NotifyBase, IAgentObserver
         catch(Exception ex){Status="错误："+ex.Message;}
         finally{if(image is not null)CryptographicOperations.ZeroMemory(image.Data);Busy=false;CommandsChanged();}
     }
+    private Task OpenBrowserSnapshotAsync()=>ExecuteBrowserToolAsync("open_browser_snapshot",JsonSerializer.Serialize(new{url=BrowserAddress.Trim(),maxChars=30_000}),true,"正在读取并生成本地安全快照…");
+    private Task ReadBrowserDomAsync()=>ExecuteBrowserToolAsync("read_browser_dom","{\"maxChars\":30000}",true,"正在读取当前安全 DOM 快照…");
+    private Task CaptureBrowserViewportAsync()=>ExecuteBrowserToolAsync("capture_browser_viewport","{}",false,"等待批准并截取可见视口…");
+    private async Task ExecuteBrowserToolAsync(string toolName,string argumentsJson,bool showOutput,string progress)
+    {
+        var session=SelectedSession;
+        if(session is null||Busy||_disposed)return;
+        CenterTabIndex=1;BrowserStatus=progress;Status=progress;Busy=true;var operationCts=new CancellationTokenSource();_runCts=operationCts;
+        try
+        {
+            var request=new ToolRequest($"UI-BROWSER-{Guid.NewGuid():N}",toolName,argumentsJson,session.Id);
+            var result=await _toolExecution.ExecuteAsync(request,this,operationCts.Token);
+            if(showOutput&&result.Status==ToolExecutionStatus.Success)BrowserDomPreview=result.Output;
+            BrowserStatus=result.Status==ToolExecutionStatus.Success
+                ?result.Summary??$"工具 {toolName} 已完成。"
+                :$"{result.Status}：{result.Error??result.Output}";
+            Status="安全浏览器："+BrowserStatus;
+        }
+        catch(OperationCanceledException){BrowserStatus="安全浏览器操作已停止。";Status=BrowserStatus;}
+        catch(Exception ex){BrowserStatus="安全浏览器错误："+ex.Message;Status=BrowserStatus;}
+        finally
+        {
+            if(ReferenceEquals(_runCts,operationCts))_runCts=null;operationCts.Dispose();Busy=false;CommandsChanged();await RefreshToolSessionsAsync();
+        }
+    }
+    private void AttachBrowserCapture()
+    {
+        if(Busy||_imageLoading||_disposed)return;
+        ImageInput? capture=_browser.TakeLatestCapture();
+        if(capture is null){BrowserStatus="没有可转移的视口截图；请先执行“截取视口”并批准。";return;}
+        try
+        {
+            var preview=CreateImagePreview(capture);
+            var previous=_pendingImage;
+            _pendingImage=capture;capture=null;
+            if(previous is not null)CryptographicOperations.ZeroMemory(previous.Data);
+            AttachedImageSummary=$"安全浏览器视口 · {_pendingImage.Width}×{_pendingImage.Height} · {_pendingImage.Data.Length/1024d:F1} KB · 仅内存";
+            AttachedImagePreview=preview;OnPropertyChanged(nameof(HasAttachedImage));CenterTabIndex=0;
+            BrowserStatus="视口截图已一次性转移到下一轮聊天；发送、替换、移除或退出时会清零像素。";
+            Status="浏览器截图已附到下一轮";CommandsChanged();
+        }
+        finally
+        {
+            if(capture is not null)CryptographicOperations.ZeroMemory(capture.Data);
+        }
+    }
     public async Task AttachImageAsync(string filePath)
     {
         if(!CanAttachImage)return;
@@ -67,9 +121,8 @@ public sealed class MainViewModel : NotifyBase, IAgentObserver
         try
         {
             loaded=await _imageInputs.LoadAsync(filePath);
-            using var stream=new MemoryStream(loaded.Data,writable:false);
-            var preview=new BitmapImage();preview.BeginInit();preview.CacheOption=BitmapCacheOption.OnLoad;preview.StreamSource=stream;preview.EndInit();preview.Freeze();
-            if(Busy){Status="当前操作已开始，刚选择的图片未附加。";return;}
+            var preview=CreateImagePreview(loaded);
+            if(Busy||_disposed){Status="当前操作已开始或应用正在退出，刚选择的图片未附加。";return;}
             var previous=_pendingImage;
             _pendingImage=loaded;loaded=null;
             if(previous is not null)CryptographicOperations.ZeroMemory(previous.Data);
@@ -81,6 +134,11 @@ public sealed class MainViewModel : NotifyBase, IAgentObserver
             if(loaded is not null)CryptographicOperations.ZeroMemory(loaded.Data);
             _imageLoading=false;OnPropertyChanged(nameof(CanAttachImage));CommandsChanged();
         }
+    }
+    private static BitmapImage CreateImagePreview(ImageInput image)
+    {
+        using var stream=new MemoryStream(image.Data,writable:false);
+        var preview=new BitmapImage();preview.BeginInit();preview.CacheOption=BitmapCacheOption.OnLoad;preview.StreamSource=stream;preview.EndInit();preview.Freeze();return preview;
     }
     private void DetachAttachedImage(ImageInput expected)
     {
@@ -115,13 +173,26 @@ public sealed class MainViewModel : NotifyBase, IAgentObserver
     private async Task StopBackgroundCommandAsync(){if(SelectedBackgroundCommand is null)return;var result=MessageBox.Show($"将终止后台任务及其进程树：\n{SelectedBackgroundCommand.Id}\n{SelectedBackgroundCommand.DisplayName}\n\n继续？","停止后台任务",MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No);if(result!=MessageBoxResult.Yes)return;await _backgroundCommands.StopAsync(SelectedBackgroundCommand.Id);await RefreshBackgroundCommandsAsync();await ReadBackgroundOutputAsync();}
     private void SyncMessages(){Messages.Clear();if(SelectedSession is not null)foreach(var x in SelectedSession.Messages)Messages.Add(x);}
     private void ApplyPreset(){var p=ProviderId switch{"deepseek"=>("https://api.deepseek.com/v1","deepseek-chat"),"openai"=>("https://api.openai.com/v1","gpt-4.1-mini"),"openrouter"=>("https://openrouter.ai/api/v1","openai/gpt-4.1-mini"),"ollama"=>("http://localhost:11434/v1","qwen2.5:7b"),_=>(Endpoint,Model)};Endpoint=p.Item1;Model=p.Item2;}
+    private void OnBrowserChanged()
+    {
+        var dispatcher=Application.Current?.Dispatcher;
+        if(dispatcher is not null&&!dispatcher.CheckAccess()){dispatcher.BeginInvoke(OnBrowserChanged);return;}
+        OnPropertyChanged(nameof(BrowserHasPage));OnPropertyChanged(nameof(BrowserHasCapture));OnPropertyChanged(nameof(BrowserPageSummary));
+        if(BrowserHasPage){CenterTabIndex=1;BrowserStatus=BrowserHasCapture?"已在内存中保留一张经净化的视口截图；可一次性附到下一轮。":"正在显示编码后的本地只读快照。";}CommandsChanged();
+    }
     public ValueTask OnStateAsync(AgentState state)=>ValueTask.CompletedTask; public ValueTask OnEventAsync(StreamEvent value){Application.Current.Dispatcher.Invoke(()=>{if(value.Kind==StreamEventKind.Reasoning)Reasoning+=value.Text;if(value.Kind==StreamEventKind.Content)StreamingContent+=value.Text;if(value.Kind==StreamEventKind.Revision)StreamingContent=value.Text;if(value.Kind==StreamEventKind.ToolStarted)Status="工具请求："+value.Text;if(value.Kind==StreamEventKind.ToolCompleted)Status=value.ToolResult?.Status==ToolExecutionStatus.Success?"工具完成："+value.ToolResult.ToolName:"工具未完成："+(value.ToolResult?.Error??value.Text);if(value.Kind==StreamEventKind.ToolSessionUpdated)_=RefreshToolSessionsAsync();});return ValueTask.CompletedTask;}
     public async ValueTask<bool> RequestToolApprovalAsync(ToolApprovalRequest request,CancellationToken ct){ct.ThrowIfCancellationRequested();var result=await Application.Current.Dispatcher.InvokeAsync(()=>MessageBox.Show($"工具：{request.ToolName}\n风险：{request.RiskLevel}\n\n参数：\n{request.Summary}\n\n是否允许本次操作？","K.netagentV0.1 工具审批",MessageBoxButton.YesNo,MessageBoxImage.Warning,MessageBoxResult.No)).Task;return result==MessageBoxResult.Yes;}
-    private void CommandsChanged(){(SendCommand as CommandBase)?.Raise();(StopCommand as CommandBase)?.Raise();(NewSessionCommand as CommandBase)?.Raise();(ClearSessionCommand as CommandBase)?.Raise();(ClearImageCommand as CommandBase)?.Raise();(GenerateIterationCommand as CommandBase)?.Raise();(ApplyIterationCommand as CommandBase)?.Raise();(CreateTaskPlanCommand as CommandBase)?.Raise();(RunTaskPlanCommand as CommandBase)?.Raise();(RefreshTaskPlansCommand as CommandBase)?.Raise();(ReviewAndRetryTaskCommand as CommandBase)?.Raise();(RefreshToolSessionsCommand as CommandBase)?.Raise();(AcknowledgeToolSessionsCommand as CommandBase)?.Raise();(RefreshBackgroundCommandsCommand as CommandBase)?.Raise();(ReadBackgroundOutputCommand as CommandBase)?.Raise();(StopBackgroundCommandCommand as CommandBase)?.Raise();}
+    private void CommandsChanged(){(SendCommand as CommandBase)?.Raise();(StopCommand as CommandBase)?.Raise();(NewSessionCommand as CommandBase)?.Raise();(ClearSessionCommand as CommandBase)?.Raise();(ClearImageCommand as CommandBase)?.Raise();(OpenBrowserSnapshotCommand as CommandBase)?.Raise();(ReadBrowserDomCommand as CommandBase)?.Raise();(CaptureBrowserViewportCommand as CommandBase)?.Raise();(AttachBrowserCaptureCommand as CommandBase)?.Raise();(GenerateIterationCommand as CommandBase)?.Raise();(ApplyIterationCommand as CommandBase)?.Raise();(CreateTaskPlanCommand as CommandBase)?.Raise();(RunTaskPlanCommand as CommandBase)?.Raise();(RefreshTaskPlansCommand as CommandBase)?.Raise();(ReviewAndRetryTaskCommand as CommandBase)?.Raise();(RefreshToolSessionsCommand as CommandBase)?.Raise();(AcknowledgeToolSessionsCommand as CommandBase)?.Raise();(RefreshBackgroundCommandsCommand as CommandBase)?.Raise();(ReadBackgroundOutputCommand as CommandBase)?.Raise();(StopBackgroundCommandCommand as CommandBase)?.Raise();}
+    public void Dispose()
+    {
+        if(_disposed)return;_disposed=true;_browser.Changed-=OnBrowserChanged;_runCts?.Cancel();
+        if(_pendingImage is not null)CryptographicOperations.ZeroMemory(_pendingImage.Data);
+        _pendingImage=null;AttachedImagePreview=null;AttachedImageSummary="";GC.SuppressFinalize(this);
+    }
 }
 public sealed record TaskNodeDisplay(string Id,string Title,TaskWorkMode Mode,TaskNodeStatus Status,string Dependencies,string RelevantPaths,string AcceptanceCriteria,string Error);
 public sealed record ToolSessionDisplay(string ToolName,string Description,ToolRiskLevel RiskLevel,ToolSessionState State,int TotalCalls,int SuccessCount,int FailureCount,string SuccessRate,string LastSummary,string LastError,string LastSuccessfulStrategy);
 public abstract class NotifyBase:INotifyPropertyChanged{public event PropertyChangedEventHandler? PropertyChanged;protected bool Set<T>(ref T field,T value,[CallerMemberName]string? name=null){if(EqualityComparer<T>.Default.Equals(field,value))return false;field=value;OnPropertyChanged(name);return true;}protected void OnPropertyChanged(string? n)=>PropertyChanged?.Invoke(this,new(n));}
 public abstract class CommandBase:ICommand{public event EventHandler? CanExecuteChanged;public abstract bool CanExecute(object? p);public abstract void Execute(object? p);public void Raise()=>CanExecuteChanged?.Invoke(this,EventArgs.Empty);}
 public sealed class RelayCommand(Action action,Func<bool>? can=null):CommandBase{public override bool CanExecute(object? p)=>can?.Invoke()??true;public override void Execute(object? p)=>action();}
-public sealed class AsyncCommand(Func<Task> action,Func<bool>? can=null):CommandBase{public override bool CanExecute(object? p)=>can?.Invoke()??true;public override async void Execute(object? p){try{await action();}catch(Exception ex){System.Windows.MessageBox.Show(ex.Message,"K.netagentV0.1");}}}
+public sealed class AsyncCommand(Func<Task> action,Func<bool>? can=null):CommandBase{public override bool CanExecute(object? p)=>can?.Invoke()??true;public Task ExecuteAsync()=>action();public override async void Execute(object? p){try{await ExecuteAsync();}catch(Exception ex){System.Windows.MessageBox.Show(ex.Message,"K.netagentV0.1");}}}

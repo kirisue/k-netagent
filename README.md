@@ -90,7 +90,7 @@ dotnet run --project .\src\TestAgent.Desktop\TestAgent.Desktop.csproj
 
 V0.2 开发分支增加本地 PNG/JPEG 图片附件：图片先校验真实格式与 20 MP / 10 MB 上限，再由 Windows 图像组件去元数据重编码。图片只保留在本轮内存中，发送前显示完整目标端点和模型并再次确认；含图请求不自动网络重试，工具循环最多三轮，因此最多四次模型请求会携带同一张图片。路径、文件名、Base64 和像素不会写入会话、记忆或工具审计，但托管内存不承诺法证级擦除。图片能力默认关闭，只有确认具体模型支持后才可启用，并且仅允许不含查询参数的 HTTPS 或本机回环 HTTP 模型端点。图片轮次当前跳过纯文本自审，避免无图审阅器改坏结果。
 
-### 17 个受控工具（V0.2 开发分支）
+### 24 个受控工具（V0.2 开发分支）
 
 文件与检索：
 
@@ -114,6 +114,12 @@ V0.2 开发分支增加本地 PNG/JPEG 图片附件：图片先校验真实格�
 - `read_background_output`
 - `stop_background_command`
 
+隔离浏览器快照：
+
+- `open_browser_snapshot`
+- `read_browser_dom`
+- `capture_browser_viewport`
+
 VS Code 工作区静态理解：
 
 - `get_vscode_workspace_status`
@@ -121,7 +127,24 @@ VS Code 工作区静态理解：
 - `list_vscode_extension_recommendations`
 - `get_vscode_docs_link`
 
+VS Code 实时只读桥：
+
+- `get_vscode_active_editor`
+- `get_vscode_diagnostics`
+- `list_vscode_available_tasks`
+- `list_vscode_installed_extensions`
+
 VS Code 工具只解析脱敏后的工作区元数据，不返回或执行 `command`、`args`、`env`、`inputs`，也不会安装、更新或删除扩展。`.vscode` 与 `*.code-workspace` 原文对通用文件工具不可见，避免绕过专用解析器。
+
+实时桥仍然只有一个中央 Agent。K.netagent 与 `vscode-extension/` 中的本地扩展通过当前 Windows 用户专属的命名管道连接；每次启动生成随机 Pipe 与 256-bit 内存配对密钥，并进行双向 HMAC 认证。扩展只接受可信、本地、单文件夹且与 Agent 工作区完全相同的 VS Code 窗口。配对后可以读取活动编辑器的相对路径/选区、Problems 的严重级别、代码、来源和位置（不传诊断正文）、当前配对工作区 `fetchTasks()` 的非执行元数据，以及已安装扩展清单；不会读取文件正文或绝对路径，也不能执行任务、命令或扩展操作。
+
+在 V0.2 开发分支中，先在右侧“VS Code 桥”页复制临时配对码，再在扩展命令面板执行 `K.netagent: Pair Read-Only Bridge` 并粘贴。配对码不写入配置、日志或 VS Code storage；连接成功时立即清除仍匹配的剪贴板内容，未连接时最多保留 75 秒。应用重启、主动断开或重连耗尽后需要重新配对。`fetchTasks()` 可能唤醒已安装扩展提供的 Task Provider，因此实时工具统一归类为 `LocalEnvironmentRead`，每次调用仍需人工审批，但桥本身绝不会启动任务。
+
+本地扩展可在仓库根目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package-VsCodeExtension.ps1` 生成并校验 VSIX，然后在 VS Code 的扩展菜单中选择 **Install from VSIX...** 安装。产物写入被 Git 忽略的 `artifacts/vscode-extension/`；脚本不会自动安装或发布扩展。
+
+浏览器工具提供一个用户可见的只读快照窗口。`open_browser_snapshot` 只获取公开 HTTPS 静态内容，再把经过 HTML 编码的文本快照显示到隔离 WebView2 中；窗口不会加载远端页面资源，不运行 JavaScript，不使用 Cookie 或登录状态，也不能点击、输入、提交表单、下载文件或打开新窗口。`read_browser_dom` 读取的是这份静态快照的有界文本与元素摘要，不是真实网页的活动 DOM。
+
+`capture_browser_viewport` 属于 `SensitiveCapture`，每次都需要明确审批。截图像素由浏览器会话私有保留，不进入工具结果、审计、会话或记忆；用户还必须将它明确附加到下一轮消息，它才会作为一次性图片输入发送给模型。未附加的截图不会自动触发模型请求。
 
 工具采用 `1 个 Agent 会话 + N 个 ToolSession`。注册多少工具，就为当前聊天或任务建立多少个隔离统计会话；ToolSession 不调用模型、不独立规划，也不是子 Agent。工具超过 12 个时仍会建立全部 ToolSession，但每轮只向模型激活最相关的最多 8 个 schema。
 
@@ -159,7 +182,10 @@ VS Code 工具只解析脱敏后的工作区元数据，不返回或执行 `comm
 - `run_command` 与后台命令只允许可信绝对路径的受限 `dotnet`、`rg` 和只读 `git` 配方。
 - `dotnet build/test/run` 可能执行工作区代码，批准前必须确认代码来源。
 - `fetch_web_content` 只读取公开 HTTPS 静态快照，提取有界标题层级与安全链接；拒绝私网、凭据 URL、Cookie、跳转、JavaScript 与超限正文，不执行链接或表单。
+- 可见浏览器使用同一套公开 HTTPS、DNS 与下载限制；远端正文只以编码后的静态文本显示，所有脚本、导航、登录态、权限请求和子资源访问均被阻断。
+- 浏览器视口截图必须单次审批并由用户显式附加到下一轮；像素只允许一次性转移，不会出现在工具输出、工具审计、会话或长期记忆中。
 - 工具输出、工作区文件、网页、历史与记忆都按不可信数据回灌，不能替代用户授权。
+- VS Code 实时桥只接受当前用户、双向认证且工作区精确匹配的连接；配对密钥仅驻内存，实时元数据每次读取都需审批。
 - 工具审计位于 `%LOCALAPPDATA%\TestAgent\audit\`，敏感字段会被脱敏。
 
 ## 构建、测试与安装包
@@ -199,15 +225,16 @@ Inno Setup 只属于维护者的构建工具，普通安装用户不需要安装
 - `src/TestAgent.Infrastructure`：Provider、JSON 存储、安全工具与进程服务。
 - `src/TestAgent.Desktop`：WPF/MVVM 与依赖注入。
 - `tests/TestAgent.Tests`：Core 和 Infrastructure 自动化测试。
+- `vscode-extension`：无第三方运行依赖的 VS Code 实时只读桥扩展源码。
 - `installer`：Inno Setup 安装器定义。
 
 ## 尚未开放
 
 - 多 Agent / 子 Agent 调度
 - 交互式 Shell / PTY
-- VS Code 实时桥接、Problems 诊断与扩展安装/更新/删除
-- 可点击、可填写表单的浏览器自动化
-- 浏览器视口截图、屏幕理解与 GUI 自动化
+- VS Code 文件正文读取、任务执行、编辑器写入与扩展安装/更新/删除
+- 可点击、可填写表单或使用登录态的浏览器自动化
+- 任意应用/桌面截图、通用屏幕理解与 GUI 自动化
 
 这些能力需要独立身份、权限和可见操作边界，不能通过通用 Shell 绕过审批。
 

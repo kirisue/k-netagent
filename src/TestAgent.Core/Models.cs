@@ -10,7 +10,11 @@ public enum ToolRiskLevel
     ProcessExecution = 2,
     Destructive = 3,
     // Appended to preserve numeric values already persisted in tool-session JSON.
-    ExternalNetwork = 4
+    ExternalNetwork = 4,
+    // Capturing a visible app can include private user data and always requires approval.
+    SensitiveCapture = 5,
+    // Reading live local application state can expose private metadata and requires approval.
+    LocalEnvironmentRead = 6
 }
 public enum ToolExecutionStatus { Success, Failed, Blocked, Cancelled, Timeout }
 
@@ -24,6 +28,13 @@ public sealed record MemoryEntry(string Id, string Name, string Content, bool En
 public sealed record SessionSearchHit(string SessionId, string SessionTitle, ChatRole Role, string Snippet,
     DateTimeOffset Timestamp);
 public sealed record ImageInput(string MimeType, byte[] Data, string Sha256, int Width, int Height);
+public sealed record BrowserDomElement(string Kind, string Text, string? Target = null);
+public sealed record BrowserDomSnapshot(string Url, string Title, string Text,
+    IReadOnlyList<BrowserDomElement> Elements, bool Truncated, DateTimeOffset CapturedAt);
+public sealed record BrowserPageDocument(string Url, string Title, BrowserDomSnapshot Dom,
+    DateTimeOffset UpdatedAt);
+public sealed record BrowserCaptureReceipt(string Url, string Title, int Width, int Height,
+    DateTimeOffset CapturedAt);
 public sealed record ProviderSettings(string ProviderId, string Endpoint, string Model, int MaxOutputTokens = 4096,
     int TimeoutSeconds = 120, int MaxContextMessages = 30, bool SelfReviewEnabled = true, int MaxSelfReviewRounds = 1,
     bool SupportsImageInput = false);
@@ -127,6 +138,17 @@ public interface ISessionHistorySearch
 public interface ISettingsStore { Task<AppSettings> LoadAsync(CancellationToken ct = default); Task SaveAsync(AppSettings settings, CancellationToken ct = default); }
 public interface ISecureSecretStore { Task<string?> GetAsync(string providerId, CancellationToken ct = default); Task SetAsync(string providerId, string secret, CancellationToken ct = default); }
 public interface IImageInputService { Task<ImageInput> LoadAsync(string filePath, CancellationToken ct = default); }
+public interface IReadOnlyBrowserSession
+{
+    BrowserPageDocument? Current { get; }
+    bool HasLatestCapture { get; }
+    event Action? Changed;
+    Task<BrowserPageDocument> OpenSnapshotAsync(string url, int maxChars = 30_000,
+        CancellationToken ct = default);
+    Task<BrowserDomSnapshot> ReadDomAsync(int maxChars = 30_000, CancellationToken ct = default);
+    Task<BrowserCaptureReceipt> CaptureViewportAsync(CancellationToken ct = default);
+    ImageInput? TakeLatestCapture();
+}
 public interface IIterationGuideStore { Task<IReadOnlyList<IterationGuide>> ListAsync(CancellationToken ct = default); }
 public interface ICodeIterationService
 {
