@@ -25,7 +25,7 @@ jobs:
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
           .\build-installer.ps1 -Version $version -SkipTests
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: k-netagent-windows-installer
           path: |
