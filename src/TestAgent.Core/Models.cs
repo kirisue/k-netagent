@@ -2,7 +2,7 @@ namespace TestAgent.Core;
 
 public enum AgentState { Idle, Streaming, Completed, Cancelled, Failed }
 public enum ChatRole { System, User, Assistant, Tool }
-public enum StreamEventKind { Content, Reasoning, Revision, ToolStarted, ToolCompleted, ToolSessionUpdated, Usage, Completed }
+public enum StreamEventKind { Content, Reasoning, Revision, ToolStarted, ToolCompleted, ToolSessionUpdated, Usage, Completed, Escalation }
 public enum ToolRiskLevel
 {
     ReadOnly = 0,
@@ -21,10 +21,12 @@ public enum ToolExecutionStatus { Success, Failed, Blocked, Cancelled, Timeout }
 public sealed record ModelToolCall(string Id, string Name, string ArgumentsJson);
 public sealed record ChatMessage(ChatRole Role, string Content, DateTimeOffset CreatedAt,
     string? ToolCallId = null, string? ToolName = null, IReadOnlyList<ModelToolCall>? ToolCalls = null);
-public sealed record ChatSession(string Id, string Title, List<ChatMessage> Messages, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, int Version = 1);
+public sealed record ChatSession(string Id, string Title, List<ChatMessage> Messages, DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt, int Version = 1, string? WorkspaceId = null);
 public enum MemoryScope { User, Session, Project }
 public sealed record MemoryEntry(string Id, string Name, string Content, bool Enabled, DateTimeOffset UpdatedAt,
-    MemoryScope Scope = MemoryScope.User, string? ScopeId = null, IReadOnlyList<string>? Tags = null);
+    MemoryScope Scope = MemoryScope.User, string? ScopeId = null, IReadOnlyList<string>? Tags = null,
+    string? WorkspaceId = null);
 public sealed record SessionSearchHit(string SessionId, string SessionTitle, ChatRole Role, string Snippet,
     DateTimeOffset Timestamp);
 public sealed record ImageInput(string MimeType, byte[] Data, string Sha256, int Width, int Height);
@@ -35,9 +37,21 @@ public sealed record BrowserPageDocument(string Url, string Title, BrowserDomSna
     DateTimeOffset UpdatedAt);
 public sealed record BrowserCaptureReceipt(string Url, string Title, int Width, int Height,
     DateTimeOffset CapturedAt);
-public sealed record ProviderSettings(string ProviderId, string Endpoint, string Model, int MaxOutputTokens = 4096,
-    int TimeoutSeconds = 120, int MaxContextMessages = 30, bool SelfReviewEnabled = true, int MaxSelfReviewRounds = 1,
-    bool SupportsImageInput = false);
+public sealed record ProviderSettings(string ProviderId, string Endpoint, string Model, int MaxOutputTokens = 32_768,
+    int TimeoutSeconds = 300, int MaxContextMessages = 30, bool SelfReviewEnabled = true, int MaxSelfReviewRounds = 1,
+    bool SupportsImageInput = false, string ReasoningEffort = "medium")
+{
+    public static string NormalizeReasoningEffort(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "none" => "none",
+        "low" => "low",
+        "medium" => "medium",
+        "high" => "high",
+        "xhigh" => "xhigh",
+        "max" => "max",
+        _ => "medium"
+    };
+}
 public sealed record AppSettings(ProviderSettings Provider, string SystemPrompt = "You are a helpful desktop AI assistant.", int Version = 1);
 public sealed record ToolParameterDefinition(string Name, string Type, string Description, bool Required = false,
     IReadOnlyList<string>? Enum = null);
@@ -67,13 +81,38 @@ public sealed class ToolSessionNeedsReviewException(string message) : InvalidOpe
 public sealed class DuplicateToolRequestException(string message) : InvalidOperationException(message);
 public sealed record ChatRequest(IReadOnlyList<ChatMessage> Messages, ProviderSettings Settings, string? ApiKey,
     IReadOnlyList<ToolDefinition>? Tools = null, IReadOnlyList<ImageInput>? Images = null);
+public enum EscalationSignalKind
+{
+    ExplicitCollaborationRequested,
+    ToolRoundLimitReached,
+    RepeatedToolCall,
+    ToolFailed,
+    ToolTimeout,
+    WriteSucceeded,
+    ValidationSucceeded,
+    UserRejected,
+    Cancelled
+}
+public sealed record EscalationSignal(EscalationSignalKind Kind, string? ToolName = null, string? Detail = null);
+public sealed record EscalationContext(string UserMessage, string DraftAnswer,
+    IReadOnlyList<EscalationSignal> Signals, IReadOnlyList<ToolDefinition> AvailableTools,
+    int ModelRounds, int ToolCalls, bool CancellationRequested = false,
+    IReadOnlyList<string>? RelevantPaths = null);
+public sealed record EscalationDecision(bool ShouldEscalate, int Score, IReadOnlyList<string> Reasons,
+    string? PeerId = null, string? DelegationTask = null, string? SuppressedReason = null);
+public interface IEscalationEvaluator
+{
+    Task<EscalationDecision> EvaluateAsync(EscalationContext context, CancellationToken ct = default);
+}
 public sealed record StreamEvent(StreamEventKind Kind, string Text = "", int? Tokens = null,
-    ModelToolCall? ToolCall = null, ToolResult? ToolResult = null);
-public sealed record AgentRunResult(ChatSession Session, AgentState State, string Content, string Reasoning, int? Tokens = null, string? Error = null);
+    ModelToolCall? ToolCall = null, ToolResult? ToolResult = null,
+    EscalationDecision? Escalation = null);
+public sealed record AgentRunResult(ChatSession Session, AgentState State, string Content, string Reasoning,
+    int? Tokens = null, string? Error = null, EscalationDecision? Escalation = null);
 public sealed record AgentRunOptions(bool PersistSession = true, string? AdditionalSystemContext = null,
     IReadOnlyList<string>? RelevantPaths = null, string? SystemPrompt = null,
     bool IncludeLongTermMemory = true, string? ToolSessionScopeId = null,
-    IReadOnlyList<ImageInput>? Images = null);
+    IReadOnlyList<ImageInput>? Images = null, string? WorkspaceId = null);
 public sealed record IterationGuide(string Id, string Title, string Goal, IReadOnlyList<string> Targets, string Content);
 public sealed record ProposedFileChange(string Path, string OriginalSha256, string OriginalContent, string NewContent);
 public sealed record IterationValidation(bool Success, string BuildOutput, string TestOutput, DateTimeOffset CompletedAt);
@@ -154,4 +193,49 @@ public interface ICodeIterationService
 {
     Task<IterationProposal> GenerateAsync(IterationGuide guide, ProviderSettings settings, string? apiKey, CancellationToken ct = default);
     Task<IterationApplyResult> ApplyAsync(IterationProposal proposal, CancellationToken ct = default);
+}
+
+public enum McpPeerKind { Codex, Claude, CustomHttp }
+public enum McpPeerConnectionState { Disconnected, Connecting, Connected, Disconnecting, Faulted }
+
+public sealed record McpPeerProfile(string Id, string Name, McpPeerKind Kind, bool Enabled,
+    string? ExecutablePath = null, string? Endpoint = null,
+    IReadOnlyList<string>? AllowedTools = null, int ConnectTimeoutSeconds = 20,
+    int OperationTimeoutSeconds = 120, int MaxOutputChars = 30_000,
+    bool AllowAutomaticEscalation = false);
+
+public sealed record McpPeerInfo(McpPeerProfile Profile, McpPeerConnectionState State,
+    string? LastError = null, DateTimeOffset? ConnectedAt = null)
+{
+    public string Id => Profile.Id;
+    public string Name => Profile.Name;
+    public McpPeerKind Kind => Profile.Kind;
+    public bool Enabled => Profile.Enabled;
+    public bool IsConnected => State == McpPeerConnectionState.Connected;
+    public IReadOnlyList<string> AllowedTools => Profile.AllowedTools ?? [];
+}
+
+public sealed record McpPeerTool(string Name, string Description, string InputSchemaJson,
+    bool Allowed = false, bool Truncated = false);
+public sealed record McpPeerCallResult(string PeerId, string ToolName, bool Success, string Output,
+    bool Truncated, string? Error, long DurationMs);
+
+public interface IMcpPeerProfileStore
+{
+    Task<IReadOnlyList<McpPeerProfile>> ListAsync(CancellationToken ct = default);
+    Task SaveAsync(McpPeerProfile profile, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
+}
+
+public interface IMcpPeerService : IDisposable, IAsyncDisposable
+{
+    event Action? Changed;
+    Task<IReadOnlyList<McpPeerInfo>> ListAsync(CancellationToken ct = default);
+    Task SaveAsync(McpPeerProfile profile, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
+    Task<McpPeerInfo> ConnectAsync(string id, CancellationToken ct = default);
+    Task DisconnectAsync(string id, CancellationToken ct = default);
+    Task<IReadOnlyList<McpPeerTool>> ListToolsAsync(string id, CancellationToken ct = default);
+    Task<McpPeerCallResult> CallToolAsync(string peerId, string toolName,
+        System.Text.Json.JsonElement arguments, CancellationToken ct = default);
 }

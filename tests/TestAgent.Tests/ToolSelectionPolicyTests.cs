@@ -27,6 +27,8 @@ public sealed class ToolSelectionPolicyTests
     [InlineData("读取 VS Code Problems 诊断", "get_vscode_diagnostics")]
     [InlineData("列出 VS Code fetchTasks 可用任务", "list_vscode_available_tasks")]
     [InlineData("查看 VS Code 已安装扩展清单", "list_vscode_installed_extensions")]
+    [InlineData("列出 MCP 可协作的 Agent", "list_mcp_peers")]
+    [InlineData("看看 Claude Code 可以借用哪些工具", "list_mcp_peer_tools")]
     public void Large_registry_activates_relevant_capability(string request, string expected)
     {
         var names = new[] { "list_files", "read_file", "search_text", "fetch_web_content", "save_memory",
@@ -35,13 +37,31 @@ public sealed class ToolSelectionPolicyTests
             "list_vscode_configured_tasks", "list_vscode_extension_recommendations", "get_vscode_docs_link",
             "get_vscode_active_editor", "get_vscode_diagnostics", "list_vscode_available_tasks",
             "list_vscode_installed_extensions", "open_browser_snapshot", "read_browser_dom",
-            "capture_browser_viewport" };
+            "capture_browser_viewport", "list_mcp_peers", "list_mcp_peer_tools", "call_mcp_peer_tool" };
         var tools = names.Select(Definition).Concat(Enumerable.Range(0, 90).Select(x => Definition("extra_" + x))).ToArray();
         var selected = ToolSelectionPolicy.Select(tools, request);
         Assert.Contains(selected, x => x.Name == expected);
         Assert.True(selected.Count <= 8);
         Assert.Equal(selected.Count, selected.Select(x => x.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Equal(selected.Select(x => x.Name), ToolSelectionPolicy.Select(tools, request).Select(x => x.Name));
+    }
+
+    [Fact]
+    public void Peer_call_is_always_available_but_discovery_tools_require_relevant_context()
+    {
+        var names = new[] { "list_files", "read_file", "search_text", "call_mcp_peer_tool",
+            "list_mcp_peers", "list_mcp_peer_tools", "run_command", "apply_patch" };
+        var tools = names.Select(Definition)
+            .Concat(Enumerable.Range(0, 30).Select(x => Definition("extra_" + x))).ToArray();
+
+        var ordinary = ToolSelectionPolicy.Select(tools, "解释一下这段业务逻辑");
+        Assert.Contains(ordinary, x => x.Name == "call_mcp_peer_tool");
+        Assert.DoesNotContain(ordinary, x => x.Name is "list_mcp_peers" or "list_mcp_peer_tools");
+
+        var collaboration = ToolSelectionPolicy.Select(tools, "当前能力不足，请与 Codex 协作验证");
+        Assert.Contains(collaboration, x => x.Name == "call_mcp_peer_tool");
+        Assert.Contains(collaboration, x => x.Name == "list_mcp_peers");
+        Assert.Contains(collaboration, x => x.Name == "list_mcp_peer_tools");
     }
 
     [Fact]

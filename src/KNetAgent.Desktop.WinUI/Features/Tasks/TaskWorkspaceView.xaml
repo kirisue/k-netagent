@@ -1,0 +1,212 @@
+<UserControl
+    x:Class="KNetAgent.Desktop.WinUI.Features.Tasks.TaskWorkspaceView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:tasks="using:KNetAgent.Desktop.WinUI.Features.Tasks">
+    <Grid Padding="16" RowSpacing="12">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="ResponsiveLayoutStates">
+                <VisualState x:Name="NarrowLayout">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="0" /></VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="WideLayout">
+                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="760" /></VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="GoalBox.(Grid.Row)" Value="0" />
+                        <Setter Target="GoalBox.(Grid.ColumnSpan)" Value="1" />
+                        <Setter Target="CreatePlanButton.(Grid.Row)" Value="0" />
+                        <Setter Target="CreatePlanButton.(Grid.Column)" Value="1" />
+                        <Setter Target="RefreshButton.(Grid.Row)" Value="0" />
+                        <Setter Target="RefreshButton.(Grid.Column)" Value="2" />
+
+                        <Setter Target="PlanListColumn.Width" Value="0.42*" />
+                        <Setter Target="PlanDetailsColumn.Width" Value="0.58*" />
+                        <Setter Target="PlanTopRow.Height" Value="*" />
+                        <Setter Target="PlanBottomRow.Height" Value="0" />
+                        <Setter Target="PlanList.Height" Value="Auto" />
+                        <Setter Target="PlanDetails.(Grid.Row)" Value="0" />
+                        <Setter Target="PlanDetails.(Grid.Column)" Value="1" />
+                        <Setter Target="PlanDetails.Margin" Value="0" />
+                        <Setter Target="PlanActionColumn2.Width" Value="*" />
+                        <Setter Target="PlanActionColumn3.Width" Value="*" />
+                        <Setter Target="RunPlanButton.(Grid.Row)" Value="0" />
+                        <Setter Target="RunPlanButton.(Grid.Column)" Value="1" />
+                        <Setter Target="AcknowledgeButton.(Grid.Row)" Value="0" />
+                        <Setter Target="AcknowledgeButton.(Grid.Column)" Value="2" />
+                        <Setter Target="AcknowledgeButton.(Grid.ColumnSpan)" Value="1" />
+                        <Setter Target="StopPlanButton.(Grid.Row)" Value="0" />
+                        <Setter Target="StopPlanButton.(Grid.Column)" Value="3" />
+                        <Setter Target="ApprovalText.(Grid.Row)" Value="1" />
+                        <Setter Target="ApprovalText.(Grid.Column)" Value="0" />
+                        <Setter Target="ApprovalText.(Grid.ColumnSpan)" Value="4" />
+
+                        <Setter Target="FileListColumn.Width" Value="0.4*" />
+                        <Setter Target="FilePreviewColumn.Width" Value="0.6*" />
+                        <Setter Target="FileTopRow.Height" Value="*" />
+                        <Setter Target="FileBottomRow.Height" Value="0" />
+                        <Setter Target="FilePreviewBox.(Grid.Row)" Value="0" />
+                        <Setter Target="FilePreviewBox.(Grid.Column)" Value="1" />
+                        <Setter Target="FilePreviewBox.Margin" Value="0" />
+
+                        <Setter Target="ChangeListColumn.Width" Value="0.35*" />
+                        <Setter Target="ChangePatchColumn.Width" Value="0.65*" />
+                        <Setter Target="ChangeTopRow.Height" Value="*" />
+                        <Setter Target="ChangeBottomRow.Height" Value="0" />
+                        <Setter Target="ChangePatchBox.(Grid.Row)" Value="0" />
+                        <Setter Target="ChangePatchBox.(Grid.Column)" Value="1" />
+                        <Setter Target="ChangePatchBox.Margin" Value="0" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Spacing="3">
+            <TextBlock Text="任务工作区" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding WorkspaceRoot}" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <TextBox x:Name="GoalBox" Grid.ColumnSpan="3"
+                     Text="{Binding Goal, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     PlaceholderText="描述要规划并执行的项目任务" />
+            <Button x:Name="CreatePlanButton" Grid.Row="1" Grid.Column="1" Content="生成计划" Command="{Binding CreatePlanCommand}" />
+            <Button x:Name="RefreshButton" Grid.Row="1" Grid.Column="2" Content="刷新" Command="{Binding RefreshCommand}" />
+        </Grid>
+
+        <TabView Grid.Row="2" IsAddTabButtonVisible="False">
+            <TabViewItem Header="计划与节点" IsClosable="False">
+                <Grid x:Name="PlanSplitGrid" ColumnSpacing="12" RowSpacing="12" Padding="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="PlanListColumn" Width="*" />
+                        <ColumnDefinition x:Name="PlanDetailsColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition x:Name="PlanTopRow" Height="Auto" />
+                        <RowDefinition x:Name="PlanBottomRow" Height="*" />
+                    </Grid.RowDefinitions>
+                    <ListView x:Name="PlanList" Height="190" ItemsSource="{Binding Plans}" SelectedItem="{Binding SelectedPlan, Mode=TwoWay}">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="tasks:TaskPlanItemViewModel">
+                                <StackPanel Padding="4" Spacing="2">
+                                    <TextBlock Text="{x:Bind Title}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                    <TextBlock Text="{x:Bind Subtitle}" Opacity="0.65" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <Grid x:Name="PlanDetails" Grid.Row="1" Margin="0,4,0,0" RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="8" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition x:Name="PlanActionColumn2" Width="0" />
+                                <ColumnDefinition x:Name="PlanActionColumn3" Width="0" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <Button Content="批准本次执行" Command="{Binding ApproveCommand}" HorizontalAlignment="Stretch" />
+                            <Button x:Name="RunPlanButton" Grid.Column="1" Content="执行 / 恢复" Command="{Binding RunOrResumeCommand}" HorizontalAlignment="Stretch" />
+                            <Button x:Name="AcknowledgeButton" Grid.Row="1" Grid.ColumnSpan="2" Content="已检查并允许重试" Command="{Binding AcknowledgeReviewCommand}" HorizontalAlignment="Stretch" />
+                            <Button x:Name="StopPlanButton" Grid.Row="2" Content="停止" Command="{Binding StopCommand}" HorizontalAlignment="Stretch" />
+                            <TextBlock x:Name="ApprovalText" Grid.Row="2" Grid.Column="1" Text="{Binding ApprovalLabel}" VerticalAlignment="Center" Opacity="0.68" TextWrapping="Wrap" />
+                        </Grid>
+                        <ListView Grid.Row="1" ItemsSource="{Binding Nodes}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="tasks:TaskNodeItemViewModel">
+                                    <StackPanel Padding="5" Spacing="3">
+                                        <TextBlock Text="{x:Bind Title}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{x:Bind Subtitle}" Opacity="0.65" />
+                                        <TextBlock Text="{x:Bind Details}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Grid>
+            </TabViewItem>
+
+            <TabViewItem Header="工作区文件" IsClosable="False">
+                <Grid ColumnSpacing="12" RowSpacing="12" Padding="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="FileListColumn" Width="*" />
+                        <ColumnDefinition x:Name="FilePreviewColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition x:Name="FileTopRow" Height="Auto" />
+                        <RowDefinition x:Name="FileBottomRow" Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="预览文件" Command="{Binding PreviewFileCommand}" />
+                            <TextBlock Text="文件列表受深度与数量限制" Opacity="0.62" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <ListView Grid.Row="1" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile, Mode=TwoWay}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="tasks:WorkspaceFileItemViewModel">
+                                    <Grid Padding="2" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Text="{x:Bind SizeLabel}" Opacity="0.58" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    <TextBox x:Name="FilePreviewBox" Grid.Row="1" Margin="0,4,0,0"
+                             Text="{Binding FilePreview}" IsReadOnly="True"
+                             AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                </Grid>
+            </TabViewItem>
+
+            <TabViewItem Header="真实变更" IsClosable="False">
+                <Grid ColumnSpacing="12" RowSpacing="12" Padding="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="ChangeListColumn" Width="*" />
+                        <ColumnDefinition x:Name="ChangePatchColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition x:Name="ChangeTopRow" Height="Auto" />
+                        <RowDefinition x:Name="ChangeBottomRow" Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid RowSpacing="6">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Button Content="刷新真实变更" Command="{Binding RefreshChangesCommand}" HorizontalAlignment="Left" />
+                        <ListView Grid.Row="1" ItemsSource="{Binding Changes}" SelectedItem="{Binding SelectedChange, Mode=TwoWay}">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="tasks:WorkspaceChangeItemViewModel">
+                                    <TextBlock Text="{x:Bind Title}" Padding="3" TextTrimming="CharacterEllipsis" />
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                    <TextBox x:Name="ChangePatchBox" Grid.Row="1" Margin="0,4,0,0"
+                             Text="{Binding SelectedPatch}" IsReadOnly="True"
+                             AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                </Grid>
+            </TabViewItem>
+        </TabView>
+
+        <InfoBar Grid.Row="3" IsOpen="True" IsClosable="False" Severity="Informational"
+                 Message="{Binding Status}" />
+    </Grid>
+</UserControl>

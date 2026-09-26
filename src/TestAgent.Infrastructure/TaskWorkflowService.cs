@@ -64,7 +64,8 @@ public sealed class SingleAgentTaskWorkflowService(
     IProjectScanner scanner,
     ITaskPlanStore store,
     IAgentRuntime agent,
-    IToolSessionCoordinator? toolSessions = null) : ITaskWorkflowService
+    IToolSessionCoordinator? toolSessions = null,
+    WorkspaceLocator? workspace = null) : ITaskWorkflowService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { PropertyNameCaseInsensitive = true };
@@ -78,12 +79,12 @@ public sealed class SingleAgentTaskWorkflowService(
         var planId = $"TASK-{Guid.NewGuid():N}";
         var raw = await RequestPlanAsync(goal.Trim(), profile, settings, apiKey, null, ct);
         TaskGraphPlan plan;
-        try { plan = ParsePlan(raw, goal.Trim(), planId); TaskGraphValidator.Validate(plan); }
+        try { plan = ParsePlan(raw, goal.Trim(), planId, workspace?.Id); TaskGraphValidator.Validate(plan); }
         catch (Exception first) when (first is JsonException or TaskGraphValidationException or InvalidDataException)
         {
             var repaired = await RequestPlanAsync(goal.Trim(), profile, settings, apiKey,
                 "The previous JSON was invalid. Repair it once. Validation error: " + first.Message + "\nPrevious output:\n" + Truncate(raw, 20_000), ct);
-            plan = ParsePlan(repaired, goal.Trim(), planId); TaskGraphValidator.Validate(plan);
+            plan = ParsePlan(repaired, goal.Trim(), planId, workspace?.Id); TaskGraphValidator.Validate(plan);
         }
         await store.SavePlanAsync(plan, ct);
         return plan;
@@ -91,8 +92,8 @@ public sealed class SingleAgentTaskWorkflowService(
 
     public async Task<IReadOnlyList<TaskWorkflowItem>> ListAsync(CancellationToken ct = default)
     {
-        var plans = await store.ListPlansAsync(ct); var result = new List<TaskWorkflowItem>();
-        foreach (var plan in plans) result.Add(new(plan, await store.LoadAsync(plan.Id, ct)));
+        var plans = await store.ListPlansAsync(workspace?.Id, ct); var result = new List<TaskWorkflowItem>();
+        foreach (var plan in plans) result.Add(new(plan, await store.LoadAsync(plan.Id, workspace?.Id, ct)));
         return result;
     }
 
@@ -100,6 +101,7 @@ public sealed class SingleAgentTaskWorkflowService(
         IAgentObserver observer, CancellationToken ct, IProgress<TaskGraphCheckpoint>? progress = null,
         string? systemPrompt = null)
     {
+        EnsureCurrentWorkspace(plan);
         var profile = await scanner.ScanAsync(ct);
         var runner = new AgentTaskNodeRunner(agent, settings, apiKey, observer, profile, systemPrompt);
         var executor = new SequentialTaskGraphExecutor(runner, store);
@@ -109,7 +111,8 @@ public sealed class SingleAgentTaskWorkflowService(
 
     public async Task<TaskGraphCheckpoint> AcknowledgeNeedsReviewAsync(TaskGraphPlan plan, CancellationToken ct = default)
     {
-        var checkpoint = await store.LoadAsync(plan.Id, ct) ?? throw new InvalidOperationException("No checkpoint exists for this plan.");
+        EnsureCurrentWorkspace(plan);
+        var checkpoint = await store.LoadAsync(plan.Id, workspace?.Id, ct) ?? throw new InvalidOperationException("No checkpoint exists for this plan in the current workspace.");
         if (checkpoint.Status != TaskGraphStatus.NeedsReview) throw new InvalidOperationException("The task is not waiting for crash review.");
         var reviewed = checkpoint with
         {
@@ -151,14 +154,19 @@ public sealed class SingleAgentTaskWorkflowService(
         return response.ToString();
     }
 
-    private static TaskGraphPlan ParsePlan(string raw, string goal, string planId)
+    private static TaskGraphPlan ParsePlan(string raw, string goal, string planId, string? workspaceId)
     {
         var dto = JsonSerializer.Deserialize<PlanDto>(ExtractJson(raw), Json)
             ?? throw new InvalidDataException("The model returned an empty plan.");
         if (dto.Nodes is null || dto.Nodes.Count == 0) throw new InvalidDataException("The plan contains no nodes.");
         var nodes = dto.Nodes.Select(x => new TaskGraphNode(x.Id ?? "", x.Title ?? "", x.Instructions ?? "",
             x.DependsOn ?? [], ParseMode(x.Mode), x.RelevantPaths ?? [], x.AcceptanceCriteria ?? [])).ToArray();
-        return new(planId, goal, nodes);
+        return new(planId, goal, nodes, WorkspaceId: workspaceId);
+    }
+    private void EnsureCurrentWorkspace(TaskGraphPlan plan)
+    {
+        if (!string.Equals(plan.WorkspaceId, workspace?.Id, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The task plan belongs to a different workspace.");
     }
     private static TaskWorkMode ParseMode(string? mode) => Enum.TryParse<TaskWorkMode>(mode, true, out var value) ? value : TaskWorkMode.Analysis;
     private static string ExtractJson(string value) { var start = value.IndexOf('{'); var end = value.LastIndexOf('}'); return start >= 0 && end > start ? value[start..(end + 1)] : value; }
@@ -209,7 +217,7 @@ internal sealed class AgentTaskNodeRunner(
         var session = new ChatSession($"NODE-{context.Plan.Id}-{context.Node.Id}-{context.Attempt}", context.Node.Title, [], now, now);
         var result = await agent.RunAsync(session, prompt, settings with { SelfReviewEnabled = false }, apiKey, observer, ct,
             new AgentRunOptions(false, additional, paths.Count == 0 ? null : paths, systemPrompt, true,
-                context.Plan.Id));
+                context.Plan.Id, WorkspaceId: context.Plan.WorkspaceId));
         if (result.State == AgentState.Cancelled) throw new OperationCanceledException("Task node execution was cancelled.", ct);
         return result.State == AgentState.Completed
             ? TaskNodeRunResult.Completed(Truncate(result.Content, 24_000))

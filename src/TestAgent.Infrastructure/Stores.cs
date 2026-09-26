@@ -16,6 +16,7 @@ public sealed class AppPaths
     public string Tasks => Path.Combine(Root, "tasks");
     public string ToolSessions => Path.Combine(Root, "tool-sessions");
     public string BrowserProfile => Path.Combine(Root, "browser-profile");
+    public string Workspaces => Path.Combine(Root, "workspaces.json");
 }
 
 public abstract class JsonDirectoryStore<T>(string directory)
@@ -31,7 +32,7 @@ public sealed class JsonMemoryStore(AppPaths paths) : JsonDirectoryStore<MemoryE
 public sealed class JsonSessionStore(AppPaths paths) : JsonDirectoryStore<ChatSession>(paths.Sessions), ISessionStore
 { public async Task<IReadOnlyList<ChatSession>> ListAsync(CancellationToken ct = default) => (await ListFiles(ct)).OrderByDescending(x => x.UpdatedAt).ToArray(); public async Task<ChatSession?> GetAsync(string id, CancellationToken ct = default) => (await ListFiles(ct)).FirstOrDefault(x => x.Id == id); public Task SaveAsync(ChatSession x, CancellationToken ct = default) => SaveFile(x.Id, x, ct); public Task DeleteAsync(string id, CancellationToken ct = default) => DeleteFile(id); }
 
-public sealed class SessionHistorySearch(ISessionStore sessions) : ISessionHistorySearch
+public sealed class SessionHistorySearch(ISessionStore sessions, WorkspaceLocator? workspace = null) : ISessionHistorySearch
 {
     public async Task<IReadOnlyList<SessionSearchHit>> SearchAsync(string query, string? excludeSessionId = null,
         int maxResults = 20, CancellationToken ct = default)
@@ -44,6 +45,8 @@ public sealed class SessionHistorySearch(ISessionStore sessions) : ISessionHisto
         foreach (var session in await sessions.ListAsync(ct))
         {
             ct.ThrowIfCancellationRequested();
+            if (workspace is not null && !string.Equals(session.WorkspaceId, workspace.Id,
+                    StringComparison.OrdinalIgnoreCase)) continue;
             if (!string.IsNullOrWhiteSpace(excludeSessionId) && session.Id.Equals(excludeSessionId, StringComparison.OrdinalIgnoreCase)) continue;
             foreach (var message in session.Messages.Where(x => x.Role is ChatRole.User or ChatRole.Assistant))
             {
@@ -119,10 +122,26 @@ public sealed class JsonTaskPlanStore(AppPaths paths) : ITaskPlanStore
         return result.OrderByDescending(x => File.GetLastWriteTimeUtc(PlanPath(x.Id))).ToArray();
     }
 
+    public async Task<IReadOnlyList<TaskGraphPlan>> ListPlansAsync(string? workspaceId,
+        CancellationToken ct = default) =>
+        (await ListPlansAsync(ct)).Where(plan => WorkspaceMatches(plan.WorkspaceId, workspaceId)).ToArray();
+
     public async Task<TaskGraphPlan?> LoadPlanAsync(string graphId, CancellationToken ct = default) =>
         await Load<TaskGraphPlan>(PlanPath(graphId), ct);
+    public async Task<TaskGraphPlan?> LoadPlanAsync(string graphId, string? workspaceId,
+        CancellationToken ct = default)
+    {
+        var plan = await LoadPlanAsync(graphId, ct);
+        return WorkspaceMatches(plan?.WorkspaceId, workspaceId) ? plan : null;
+    }
     public async Task<TaskGraphCheckpoint?> LoadAsync(string graphId, CancellationToken cancellationToken = default) =>
         await Load<TaskGraphCheckpoint>(CheckpointPath(graphId), cancellationToken);
+    public async Task<TaskGraphCheckpoint?> LoadAsync(string graphId, string? workspaceId,
+        CancellationToken cancellationToken = default)
+    {
+        var checkpoint = await LoadAsync(graphId, cancellationToken);
+        return WorkspaceMatches(checkpoint?.WorkspaceId, workspaceId) ? checkpoint : null;
+    }
     public Task SavePlanAsync(TaskGraphPlan plan, CancellationToken ct = default) => Save(PlanPath(plan.Id), plan, ct);
     public Task SaveAsync(TaskGraphCheckpoint checkpoint, CancellationToken ct = default) => Save(CheckpointPath(checkpoint.GraphId), checkpoint, ct);
 
@@ -150,6 +169,10 @@ public sealed class JsonTaskPlanStore(AppPaths paths) : ITaskPlanStore
         return id;
     }
     private static void Quarantine(string path) { if (File.Exists(path)) File.Move(path, path + ".corrupt", true); }
+    private static bool WorkspaceMatches(string? value, string? expected) =>
+        string.IsNullOrWhiteSpace(expected)
+            ? string.IsNullOrWhiteSpace(value)
+            : string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
 }
 public sealed class JsonSettingsStore(AppPaths paths) : ISettingsStore
 {
@@ -161,12 +184,25 @@ public sealed class JsonSettingsStore(AppPaths paths) : ISettingsStore
             var value=JsonSerializer.Deserialize<AppSettings>(await File.ReadAllTextAsync(paths.Config,ct),new JsonSerializerOptions(JsonSerializerDefaults.Web));
             if(value?.Provider is not { } provider||string.IsNullOrWhiteSpace(provider.ProviderId)||string.IsNullOrWhiteSpace(provider.Endpoint)||string.IsNullOrWhiteSpace(provider.Model))return Defaults();
             if(!Uri.TryCreate(provider.Endpoint,UriKind.Absolute,out var endpoint)||endpoint.Scheme is not ("https" or "http"))return Defaults();
-            return value with{Provider=provider with{MaxOutputTokens=Math.Clamp(provider.MaxOutputTokens,1,128_000),TimeoutSeconds=Math.Clamp(provider.TimeoutSeconds,5,600),MaxContextMessages=Math.Clamp(provider.MaxContextMessages,1,200),MaxSelfReviewRounds=Math.Clamp(provider.MaxSelfReviewRounds,0,2)}};
+            return Normalize(value);
         }
         catch(Exception ex) when(ex is JsonException or IOException or UnauthorizedAccessException){return Defaults();}
     }
-    public async Task SaveAsync(AppSettings value, CancellationToken ct = default) { Directory.CreateDirectory(paths.Root); await File.WriteAllTextAsync(paths.Config, JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }), ct); }
-    public static AppSettings Defaults() => new(new("deepseek", "https://api.deepseek.com/v1", "deepseek-chat"));
+    public async Task SaveAsync(AppSettings value, CancellationToken ct = default) { Directory.CreateDirectory(paths.Root); await File.WriteAllTextAsync(paths.Config, JsonSerializer.Serialize(Normalize(value), new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }), ct); }
+    public static AppSettings Defaults() => new(new("openai", "https://api.openai.com/v1", "gpt-5.6-sol",
+        MaxOutputTokens: 32_768, TimeoutSeconds: 300, ReasoningEffort: "medium"));
+    private static AppSettings Normalize(AppSettings value)
+    {
+        var provider = value.Provider;
+        return value with { Provider = provider with
+        {
+            MaxOutputTokens = Math.Clamp(provider.MaxOutputTokens, 1, 128_000),
+            TimeoutSeconds = Math.Clamp(provider.TimeoutSeconds, 5, 600),
+            MaxContextMessages = Math.Clamp(provider.MaxContextMessages, 1, 200),
+            MaxSelfReviewRounds = Math.Clamp(provider.MaxSelfReviewRounds, 0, 2),
+            ReasoningEffort = ProviderSettings.NormalizeReasoningEffort(provider.ReasoningEffort)
+        }};
+    }
 }
 public sealed class DpapiSecretStore(AppPaths paths) : ISecureSecretStore
 {

@@ -57,7 +57,8 @@ public sealed record TaskGraphPlan(
     string Id,
     string Goal,
     IReadOnlyList<TaskGraphNode> Nodes,
-    int Version = 1);
+    int Version = 1,
+    string? WorkspaceId = null);
 
 /// <summary>
 /// Result returned by the adapter that performs one node with the current Agent runtime.
@@ -90,7 +91,8 @@ public sealed record TaskGraphCheckpoint(
     IReadOnlyList<TaskNodeCheckpoint> Nodes,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    int Version = 1);
+    int Version = 1,
+    string? WorkspaceId = null);
 
 /// <summary>
 /// Scoped context for a node. Only completed dependency results are exposed to the runner.
@@ -109,7 +111,18 @@ public interface ITaskNodeRunner
 public interface ITaskGraphCheckpointStore
 {
     Task<TaskGraphCheckpoint?> LoadAsync(string graphId, CancellationToken cancellationToken = default);
+    async Task<TaskGraphCheckpoint?> LoadAsync(string graphId, string? workspaceId,
+        CancellationToken cancellationToken = default)
+    {
+        var checkpoint = await LoadAsync(graphId, cancellationToken);
+        return WorkspaceMatches(checkpoint?.WorkspaceId, workspaceId) ? checkpoint : null;
+    }
     Task SaveAsync(TaskGraphCheckpoint checkpoint, CancellationToken cancellationToken = default);
+
+    private static bool WorkspaceMatches(string? value, string? expected) =>
+        string.IsNullOrWhiteSpace(expected)
+            ? string.IsNullOrWhiteSpace(value)
+            : string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class TaskGraphValidationException(string message) : ArgumentException(message);
@@ -135,6 +148,8 @@ public static class TaskGraphValidator
         ArgumentNullException.ThrowIfNull(plan);
         RequireText(plan.Id, nameof(plan.Id), MaxIdLength);
         RequireText(plan.Goal, nameof(plan.Goal), MaxGoalLength);
+        if (plan.WorkspaceId is not null)
+            RequireText(plan.WorkspaceId, "Workspace ID", MaxIdLength);
         if (plan.Version < 1) throw new TaskGraphValidationException("Plan version must be at least 1.");
         if (plan.Nodes is null || plan.Nodes.Count == 0)
             throw new TaskGraphValidationException("A task graph must contain at least one node.");
@@ -212,6 +227,7 @@ public static class TaskGraphValidator
         var normalized = new StringBuilder()
             .Append(plan.Id).Append('\n')
             .Append(plan.Version).Append('\n')
+            .Append("workspace:").Append(plan.WorkspaceId ?? "<legacy-unscoped>").Append('\n')
             .Append(plan.Goal).Append('\n');
         foreach (var node in plan.Nodes)
         {
@@ -287,6 +303,8 @@ public sealed class SequentialTaskGraphExecutor(
     {
         TaskGraphValidator.Validate(plan);
         var fingerprint = TaskGraphValidator.Fingerprint(plan);
+        // Load by graph identity first so a same-ID checkpoint from another workspace is rejected
+        // by ValidateCheckpoint instead of being mistaken for a missing checkpoint and overwritten.
         var checkpoint = await checkpoints.LoadAsync(plan.Id, CancellationToken.None)
             ?? CreateCheckpoint(plan, fingerprint);
         ValidateCheckpoint(plan, fingerprint, checkpoint);
@@ -440,7 +458,8 @@ public sealed class SequentialTaskGraphExecutor(
             TaskGraphStatus.Ready,
             plan.Nodes.Select(node => new TaskNodeCheckpoint(node.Id, TaskNodeStatus.Pending, 0, null, null, null, null)).ToArray(),
             now,
-            now);
+            now,
+            WorkspaceId: plan.WorkspaceId);
     }
 
     private TaskGraphCheckpoint Snapshot(
@@ -459,6 +478,8 @@ public sealed class SequentialTaskGraphExecutor(
     {
         if (!checkpoint.GraphId.Equals(plan.Id, StringComparison.OrdinalIgnoreCase))
             throw new TaskGraphValidationException("Checkpoint graph ID does not match the plan.");
+        if (!string.Equals(checkpoint.WorkspaceId, plan.WorkspaceId, StringComparison.OrdinalIgnoreCase))
+            throw new TaskGraphValidationException("Checkpoint workspace does not match the plan workspace.");
         if (!checkpoint.PlanFingerprint.Equals(fingerprint, StringComparison.Ordinal))
             throw new TaskGraphValidationException("The plan changed after its checkpoint was created. Create a new graph ID or discard the old checkpoint.");
         if (checkpoint.Version != 1)

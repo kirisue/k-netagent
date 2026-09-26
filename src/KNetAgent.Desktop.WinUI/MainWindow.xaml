@@ -1,0 +1,444 @@
+<Window
+    x:Class="KNetAgent.Desktop.WinUI.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:browser="using:KNetAgent.Desktop.WinUI.Browser"
+    xmlns:media="using:KNetAgent.Desktop.WinUI.Features.Media"
+    Title="K.netagent">
+
+    <Grid x:Name="ShellRoot" Background="{StaticResource KNetBackgroundBrush}">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="ResponsiveLayoutStates">
+                <VisualState x:Name="WideLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="1180" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LeftRailColumn.Width" Value="252" />
+                        <Setter Target="LeftRail.Visibility" Value="Visible" />
+                        <Setter Target="InspectorColumn.Width" Value="320" />
+                        <Setter Target="InspectorPanel.Visibility" Value="Visible" />
+                        <Setter Target="OpenNavigationButton.Visibility" Value="Visible" />
+                        <Setter Target="OpenInspectorButton.Visibility" Value="Collapsed" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="MediumLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="760" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LeftRailColumn.Width" Value="224" />
+                        <Setter Target="LeftRail.Visibility" Value="Visible" />
+                        <Setter Target="InspectorColumn.Width" Value="0" />
+                        <Setter Target="InspectorPanel.Visibility" Value="Collapsed" />
+                        <Setter Target="OpenNavigationButton.Visibility" Value="Visible" />
+                        <Setter Target="OpenInspectorButton.Visibility" Value="Visible" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="NarrowLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="LeftRailColumn.Width" Value="0" />
+                        <Setter Target="LeftRail.Visibility" Value="Collapsed" />
+                        <Setter Target="InspectorColumn.Width" Value="0" />
+                        <Setter Target="InspectorPanel.Visibility" Value="Collapsed" />
+                        <Setter Target="OpenNavigationButton.Visibility" Value="Visible" />
+                        <Setter Target="OpenInspectorButton.Visibility" Value="Visible" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="46" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Background="{StaticResource KNetRailBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                <Border Width="24" Height="24" CornerRadius="7" Background="{StaticResource KNetAccentBrush}">
+                    <TextBlock Text="K" Foreground="#111318" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="K.netagent" Margin="9,0,0,0" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{x:Bind AppVersionLabel}" Margin="8,0,0,0" FontSize="10"
+                           Foreground="{StaticResource KNetTextSecondaryBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+            <TextBlock
+                Grid.Column="1"
+                Text="{Binding CurrentWorkspaceName}"
+                Foreground="{StaticResource KNetTextSecondaryBrush}"
+                FontSize="12"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{Binding CurrentWorkspacePath}" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,138,0">
+                <Ellipse Width="7" Height="7" Fill="{StaticResource KNetAccentBrush}" />
+                <TextBlock Text="{Binding Status}" Foreground="{StaticResource KNetTextSecondaryBrush}" FontSize="12" Margin="6,0,0,0" />
+            </StackPanel>
+        </Grid>
+
+        <ContentControl x:Name="MainInteractiveContent" Grid.Row="1"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftRailColumn" Width="252" />
+                <ColumnDefinition x:Name="ConversationColumn" Width="*" MinWidth="360" />
+                <ColumnDefinition x:Name="InspectorColumn" Width="320" />
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="LeftRail" Grid.Column="0" Background="{StaticResource KNetRailBrush}" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="0,1,1,0">
+                <Grid Padding="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Button Content="＋  新任务" Command="{Binding NewSessionCommand}" Style="{StaticResource KNetPrimaryButtonStyle}" HorizontalAlignment="Stretch" />
+                    <TextBox Grid.Row="1"
+                             Text="{Binding SessionSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             PlaceholderText="搜索任务与最近消息"
+                             Margin="0,10,0,14"
+                             CornerRadius="8" />
+                    <TextBlock Grid.Row="2" Text="最近任务" Style="{StaticResource KNetSectionLabelStyle}" Margin="8,0,0,8" />
+                    <ListView Grid.Row="3"
+                              ItemsSource="{Binding VisibleSessions}"
+                              SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
+                              SelectionMode="Single"
+                              Background="Transparent">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel MinWidth="150" Padding="2,3">
+                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding UpdatedAt}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <StackPanel Grid.Row="4" Spacing="2">
+                        <Button Content="▤  Windows 事件中心" Click="OpenWindowsEvents_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="⚒  Windows 服务状态" Click="OpenWindowsServices_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="◫  记忆" Tag="memory" Click="OpenInspectorTab_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="⌘  工具会话" Tag="tools" Click="OpenInspectorTab_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="▦  任务与变更" Click="OpenTaskWorkspace_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="◉  项目运维" Click="OpenOperations_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="⚙  设置" Tag="settings" Click="OpenSettings_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                        <Button Content="清空当前任务" Command="{Binding ClearSessionCommand}" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" Foreground="{StaticResource KNetDangerBrush}" />
+                        <Button Content="收起导航" Click="CloseNavigation_Click" Style="{StaticResource KNetNavigationButtonStyle}" HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid x:Name="ConversationArea" Grid.Column="1" Background="{StaticResource KNetBackgroundBrush}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="52" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="0,1,0,1" Padding="14,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="OpenNavigationButton"
+                            Content="☰"
+                            Click="ToggleNavigation_Click"
+                            Style="{StaticResource KNetIconButtonStyle}"
+                            Visibility="Visible"
+                            AutomationProperties.Name="显示或收起导航"
+                            ToolTipService.ToolTip="显示或收起导航" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0">
+                        <TextBlock Text="{Binding SelectedSessionTitle}" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="{Binding Model}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            <TextBlock Text="·" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            <TextBlock Text="{Binding AgentState}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            <TextBlock Text="· Tokens" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            <TextBlock Text="{Binding LastTokenUsage}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Button
+                        x:Name="WorkspaceSwitcherButton"
+                        Grid.Column="2"
+                        Click="OpenWorkspaces_Click"
+                        MaxWidth="220"
+                        Margin="4,0"
+                        Padding="10,6"
+                        Style="{StaticResource KNetSurfaceButtonStyle}"
+                        AutomationProperties.Name="选择当前工作区"
+                        ToolTipService.ToolTip="{Binding CurrentWorkspacePath}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="13" />
+                            <TextBlock Text="{Binding CurrentWorkspaceName}" MaxWidth="120" TextTrimming="CharacterEllipsis" />
+                            <FontIcon Glyph="&#xE70D;" FontSize="10" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="OpenInspectorButton" Grid.Column="3" Content="☷" Click="OpenInspector_Click" Style="{StaticResource KNetIconButtonStyle}" Visibility="Collapsed" ToolTipService.ToolTip="打开检查器" />
+                </Grid>
+
+                <ListView Grid.Row="1"
+                          x:Name="MessageFeed"
+                          ItemsSource="{Binding Messages}"
+                          SelectionMode="None"
+                          Background="Transparent"
+                          Padding="20,20,20,8">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0,0,0,14" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Border MaxWidth="820" HorizontalAlignment="Stretch" Background="{StaticResource KNetSurfaceBrush}" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="15">
+                                <StackPanel Spacing="9">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding RoleLabel}" FontWeight="SemiBold" Foreground="{StaticResource KNetAccentBrush}" />
+                                        <TextBlock Grid.Column="1" Text="{Binding TimestampText}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap" LineHeight="23" IsTextSelectionEnabled="True" />
+                                    <Expander Header="推理过程">
+                                        <TextBlock Text="{Binding Reasoning}" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" Padding="0,8,0,0" />
+                                    </Expander>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                    <ListView.Footer>
+                        <StackPanel MaxWidth="820" HorizontalAlignment="Stretch" Spacing="8" Padding="0,4,0,14" Visibility="{x:Bind ViewModel.Busy, Mode=OneWay}">
+                            <Border Background="{StaticResource KNetSurfaceBrush}" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="1" CornerRadius="12" Padding="15">
+                                <StackPanel Spacing="9">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <ProgressRing Width="18" Height="18" IsActive="{Binding Busy}" />
+                                        <TextBlock Text="K.netagent" FontWeight="SemiBold" Foreground="{StaticResource KNetAccentBrush}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding StreamingContent}" TextWrapping="Wrap" LineHeight="23" IsTextSelectionEnabled="True" />
+                                    <Expander Header="实时推理" IsExpanded="False">
+                                        <TextBlock Text="{Binding Reasoning}" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" Padding="0,8,0,0" />
+                                    </Expander>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding Status}" Foreground="{StaticResource KNetTextSecondaryBrush}" HorizontalAlignment="Center" FontSize="11" />
+                        </StackPanel>
+                    </ListView.Footer>
+                </ListView>
+
+                <Grid Grid.Row="2" Padding="20,10,20,18">
+                    <Border MaxWidth="840" HorizontalAlignment="Stretch" Background="{StaticResource KNetSurfaceBrush}" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="1" CornerRadius="16" Padding="12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <media:MediaAttachmentControl x:Name="MediaControl" />
+                            <TextBox Grid.Row="1" Text="{Binding Input, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="给 K.netagent 一项任务…" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" MaxHeight="180" Background="Transparent" BorderThickness="0" KeyDown="Composer_KeyDown" />
+                            <Grid Grid.Row="2" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                    <Button Content="＋"
+                                            Style="{StaticResource KNetIconButtonStyle}"
+                                            AutomationProperties.Name="打开任务与工具菜单"
+                                            ToolTipService.ToolTip="任务、计划与工具">
+                                        <Button.Flyout>
+                                            <MenuFlyout Placement="TopEdgeAlignedLeft">
+                                                <MenuFlyoutItem Text="新建任务" Command="{x:Bind ViewModel.NewSessionCommand}" />
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Text="当前工作区…" Tag="workspaces" Click="OpenWorkspaces_Click" />
+                                                <MenuFlyoutItem Text="新建项目…" Tag="create-workspace" Click="CreateWorkspace_Click" />
+                                                <MenuFlyoutItem Text="打开文件夹…" Tag="open-workspace" Click="OpenWorkspaceFolder_Click" />
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Text="任务、文件与变更…" Click="OpenTaskWorkspace_Click" />
+                                                <MenuFlyoutItem Text="只读浏览器…" Click="OpenBrowser_Click" />
+                                                <MenuFlyoutItem Text="项目运维…" Click="OpenOperations_Click" />
+                                                <MenuFlyoutItem Text="Windows 事件中心…" Click="OpenWindowsEvents_Click" />
+                                                <MenuFlyoutItem Text="Windows 服务状态…" Click="OpenWindowsServices_Click" />
+                                                <MenuFlyoutItem Text="工具会话" Tag="tools" Click="OpenInspectorTab_Click" />
+                                                <MenuFlyoutItem Text="记忆" Tag="memory" Click="OpenInspectorTab_Click" />
+                                                <MenuFlyoutItem Text="外部 Agent / MCP" Tag="mcp-peers" Click="OpenMcpPeers_Click" />
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Text="设置" Tag="settings" Click="OpenSettings_Click" />
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                    <ComboBox ItemsSource="{Binding ReasoningEfforts}"
+                                              SelectedItem="{Binding ReasoningEffort, Mode=TwoWay}"
+                                              MinWidth="118"
+                                              HorizontalAlignment="Left"
+                                              ToolTipService.ToolTip="推理强度" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                    <Button Content="■" Command="{Binding StopCommand}" Style="{StaticResource KNetIconButtonStyle}" ToolTipService.ToolTip="停止" />
+                                    <Button Content="↑" Command="{Binding SendCommand}" Style="{StaticResource KNetPrimaryButtonStyle}" MinWidth="38" Padding="10,7" ToolTipService.ToolTip="发送" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="BrowserArea"
+                  Grid.Column="1"
+                  Visibility="Collapsed"
+                  Background="{StaticResource KNetBackgroundBrush}"
+                  Padding="16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Content="← 返回聊天" Click="BackToChat_Click" Style="{StaticResource KNetSurfaceButtonStyle}" />
+                    <TextBlock Grid.Column="1" Text="安全只读浏览器" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
+                </Grid>
+                <browser:ReadOnlyBrowserControl x:Name="BrowserControl" Grid.Row="1" />
+            </Grid>
+
+            <Border x:Name="InspectorPanel" Grid.Column="2" Background="{StaticResource KNetRailBrush}" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="1,1,0,0" Visibility="{x:Bind ViewModel.IsInspectorOpen, Mode=OneWay}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="52" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Padding="14,0" BorderBrush="{StaticResource KNetBorderBrush}" BorderThickness="0,0,0,1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="InspectorTabSelector"
+                                  ItemsSource="{Binding InspectorTabs}"
+                                  SelectedItem="{Binding SelectedInspectorTab, Mode=TwoWay}"
+                                  DisplayMemberPath="Title"
+                                  SelectionChanged="InspectorTabSelector_SelectionChanged"
+                                  Background="Transparent"
+                                  BorderThickness="0"
+                                  FontWeight="SemiBold"
+                                  HorizontalAlignment="Stretch" />
+                        <Button Grid.Column="1" Content="×" Click="CloseInspector_Click" Style="{StaticResource KNetIconButtonStyle}" />
+                    </Grid>
+                    <TabView x:Name="InspectorTabsControl" Grid.Row="1" IsAddTabButtonVisible="False" CanDragTabs="False" TabWidthMode="SizeToContent" SelectionChanged="InspectorContent_SelectionChanged">
+                        <TabViewItem Header="计划" IsClosable="False">
+                            <StackPanel Padding="14" Spacing="10">
+                                <TextBlock Text="任务计划" Style="{StaticResource KNetSectionLabelStyle}" />
+                                <TextBlock Text="已接入工作区绑定的 TaskGraph、节点检查点、停止与恢复。" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                <Button Content="打开任务工作区" Click="OpenTaskWorkspace_Click" Style="{StaticResource KNetPrimaryButtonStyle}" />
+                            </StackPanel>
+                        </TabViewItem>
+
+                        <TabViewItem Header="变更" IsClosable="False">
+                            <StackPanel Padding="14" Spacing="10">
+                                <TextBlock Text="文件变更" Style="{StaticResource KNetSectionLabelStyle}" />
+                                <TextBlock Text="已接入有界文件树与 Git/已批准工具结果产生的真实变更证据。" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                <Button Content="打开文件与真实 Diff" Click="OpenTaskWorkspace_Click" Style="{StaticResource KNetPrimaryButtonStyle}" />
+                            </StackPanel>
+                        </TabViewItem>
+
+                        <TabViewItem Header="工具" IsClosable="False">
+                            <Grid Padding="12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="{Binding ToolSessionStatus}" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" Margin="0,0,0,8" />
+                                <ListView Grid.Row="1" ItemsSource="{Binding ToolSessions}" SelectionMode="None" Background="Transparent">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{StaticResource KNetSurfaceBrush}" CornerRadius="9" Padding="10" Margin="0,0,0,8">
+                                                <StackPanel Spacing="4">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding ToolName}" FontWeight="SemiBold" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding State}" Foreground="{StaticResource KNetAccentBrush}" />
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                                    <TextBlock Text="{Binding LastSummary}" TextWrapping="Wrap" FontSize="11" />
+                                                    <TextBlock Text="{Binding LastError}" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource KNetDangerBrush}" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6">
+                                    <Button Content="刷新" Command="{Binding RefreshToolSessionsCommand}" Style="{StaticResource KNetSurfaceButtonStyle}" />
+                                    <Button Content="已检查并恢复" Command="{Binding AcknowledgeToolSessionsCommand}" Style="{StaticResource KNetSurfaceButtonStyle}" />
+                                </StackPanel>
+                            </Grid>
+                        </TabViewItem>
+
+                        <TabViewItem Header="记忆" IsClosable="False">
+                            <Grid Padding="12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="180" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <ListView ItemsSource="{Binding Memories}" SelectedItem="{Binding SelectedMemory, Mode=TwoWay}" DisplayMemberPath="Name" />
+                                <ScrollViewer Grid.Row="1" Margin="0,10,0,0">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="名称" Style="{StaticResource KNetSectionLabelStyle}" />
+                                        <TextBox Text="{Binding MemoryName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Text="内容" Style="{StaticResource KNetSectionLabelStyle}" />
+                                        <TextBox Text="{Binding MemoryContent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" />
+                                        <TextBlock Text="范围" Style="{StaticResource KNetSectionLabelStyle}" />
+                                        <ComboBox ItemsSource="{Binding MemoryScopes}" SelectedItem="{Binding MemoryScope, Mode=TwoWay}" HorizontalAlignment="Stretch" />
+                                        <TextBox Text="{Binding MemoryScopeId, Mode=TwoWay}" PlaceholderText="会话 ID 或项目相对路径" />
+                                        <CheckBox Content="启用并注入上下文" IsChecked="{Binding MemoryEnabled, Mode=TwoWay}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Button Content="保存" Command="{Binding SaveMemoryCommand}" Style="{StaticResource KNetPrimaryButtonStyle}" />
+                                            <Button Content="删除" Command="{Binding DeleteMemoryCommand}" Style="{StaticResource KNetSurfaceButtonStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Grid>
+                        </TabViewItem>
+
+                        <TabViewItem Header="上下文" IsClosable="False">
+                            <StackPanel Padding="14" Spacing="10">
+                                <TextBlock Text="当前运行" Style="{StaticResource KNetSectionLabelStyle}" />
+                                <Border Background="{StaticResource KNetSurfaceBrush}" CornerRadius="9" Padding="12">
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{Binding AgentState}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <TextBlock Text="最近用量" />
+                                            <TextBlock Text="{Binding LastTokenUsage}" Foreground="{StaticResource KNetAccentBrush}" />
+                                            <TextBlock Text="tokens" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="计划与文件 Diff 将在对应后端适配完成后显示；当前界面不会伪造任务结果。" TextWrapping="Wrap" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            </StackPanel>
+                        </TabViewItem>
+                    </TabView>
+                </Grid>
+            </Border>
+        </Grid>
+        </ContentControl>
+    </Grid>
+</Window>

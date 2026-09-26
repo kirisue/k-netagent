@@ -1,6 +1,8 @@
 # .NET / build outputs
 **/bin/
 **/obj/
+**/.artifacts/
+**/.headless-obj/
 build/
 dist/
 artifacts/

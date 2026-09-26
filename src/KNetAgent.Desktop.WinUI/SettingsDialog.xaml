@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="KNetAgent.Desktop.WinUI.SettingsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="模型与运行设置"
+    PrimaryButtonText="保存设置"
+    CloseButtonText="取消"
+    DefaultButton="Primary"
+    PrimaryButtonClick="SettingsDialog_PrimaryButtonClick"
+    Closed="SettingsDialog_Closed">
+
+    <ScrollViewer
+        Width="520"
+        MaxHeight="640"
+        HorizontalScrollBarVisibility="Disabled"
+        VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="10" Padding="0,4,0,2">
+            <TextBlock
+                Text="模型服务"
+                FontSize="16"
+                FontWeight="SemiBold" />
+
+            <TextBlock Text="Provider" Style="{StaticResource KNetSectionLabelStyle}" />
+            <ComboBox
+                ItemsSource="{Binding ProviderIds}"
+                SelectedItem="{Binding ProviderId, Mode=TwoWay}"
+                HorizontalAlignment="Stretch" />
+
+            <TextBlock Text="Endpoint" Style="{StaticResource KNetSectionLabelStyle}" />
+            <TextBox
+                Text="{Binding Endpoint, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                PlaceholderText="https://api.openai.com/v1" />
+
+            <TextBlock Text="模型" Style="{StaticResource KNetSectionLabelStyle}" />
+            <AutoSuggestBox
+                Text="{Binding Model, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                ItemsSource="{Binding ModelSuggestions}"
+                PlaceholderText="例如 gpt-5.6-sol" />
+
+            <TextBlock Text="推理强度" Style="{StaticResource KNetSectionLabelStyle}" />
+            <ComboBox
+                ItemsSource="{Binding ReasoningEfforts}"
+                SelectedItem="{Binding ReasoningEffort, Mode=TwoWay}"
+                HorizontalAlignment="Stretch" />
+            <TextBlock
+                Text="官方 OpenAI GPT-5.6 会发送 reasoning_effort；其他兼容 Provider 保持各自协议。"
+                TextWrapping="Wrap"
+                FontSize="11"
+                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+
+            <TextBlock Text="API Key（DPAPI 安全保存）" Style="{StaticResource KNetSectionLabelStyle}" />
+            <PasswordBox
+                Password="{Binding ApiKey, Mode=TwoWay}"
+                PlaceholderText="留空则保留已保存的 Key" />
+
+            <Rectangle Height="1" Margin="0,6" Fill="{StaticResource KNetBorderBrush}" />
+
+            <TextBlock
+                Text="默认运行配置"
+                FontSize="16"
+                FontWeight="SemiBold" />
+
+            <TextBlock Text="最大输出 Tokens" Style="{StaticResource KNetSectionLabelStyle}" />
+            <NumberBox
+                Value="{Binding MaxTokens, Mode=TwoWay}"
+                Minimum="256"
+                Maximum="128000"
+                SmallChange="1024"
+                SpinButtonPlacementMode="Compact" />
+            <TextBlock
+                Text="这是单次回答的最大输出预算，不是上下文窗口；日常 Agent 任务建议从 32,768 起。"
+                TextWrapping="Wrap"
+                FontSize="11"
+                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+
+            <TextBlock Text="请求超时（秒）" Style="{StaticResource KNetSectionLabelStyle}" />
+            <NumberBox
+                Value="{Binding TimeoutSeconds, Mode=TwoWay}"
+                Minimum="5"
+                Maximum="600"
+                SmallChange="30"
+                SpinButtonPlacementMode="Compact" />
+
+            <CheckBox
+                Content="回答完成后自审一次"
+                IsChecked="{Binding SelfReviewEnabled, Mode=TwoWay}" />
+
+            <CheckBox
+                Content="我已确认当前模型支持图片输入"
+                IsChecked="{Binding SupportsImageInput, Mode=TwoWay}" />
+            <TextBlock
+                Text="该能力按具体 Provider、Endpoint 和模型确认；任一项变化后会自动关闭，避免把图片发送到不支持或错误的目标。"
+                TextWrapping="Wrap"
+                FontSize="11"
+                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+
+            <Button
+                Content="载入推荐 GPT-5.6 设置"
+                Command="{Binding ApplyRecommendedModelSettingsCommand}"
+                Style="{StaticResource KNetSurfaceButtonStyle}"
+                HorizontalAlignment="Stretch"
+                Margin="0,6,0,0" />
+
+            <TextBlock
+                Text="推荐值：OpenAI · gpt-5.6-sol · medium · 32,768 tokens · 300 秒。点击下方“保存设置”后才会写入。"
+                TextWrapping="Wrap"
+                FontSize="11"
+                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+
+            <InfoBar
+                x:Name="SettingsErrorBar"
+                IsOpen="False"
+                Severity="Error"
+                Title="设置未保存" />
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>

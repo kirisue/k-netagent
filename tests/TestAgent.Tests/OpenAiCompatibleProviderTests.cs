@@ -100,6 +100,52 @@ public sealed class OpenAiCompatibleProviderTests
         using var doc=JsonDocument.Parse(body!);var function=doc.RootElement.GetProperty("tools")[0].GetProperty("function");Assert.Contains("Example:",function.GetProperty("description").GetString());var path=function.GetProperty("parameters").GetProperty("properties").GetProperty("path");Assert.False(path.TryGetProperty("enum",out _));
     }
 
+    [Theory]
+    [InlineData("none", "none")]
+    [InlineData(" LOW ", "low")]
+    [InlineData("medium", "medium")]
+    [InlineData("HIGH", "high")]
+    [InlineData("xhigh", "xhigh")]
+    [InlineData("max", "max")]
+    [InlineData("unsupported", "medium")]
+    public async Task OpenAi_gpt_5_6_uses_completion_limit_and_normalized_reasoning_effort(
+        string configuredEffort, string expectedEffort)
+    {
+        string? body = null;
+        var provider = new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(value => body = value)));
+        var settings = new ProviderSettings("openai", "https://api.openai.com/v1", "gpt-5.6-sol",
+            MaxOutputTokens: 32_768, ReasoningEffort: configuredEffort);
+
+        await foreach (var _ in provider.StreamAsync(new([], settings, null), CancellationToken.None)) { }
+
+        using var document = JsonDocument.Parse(body!);
+        var root = document.RootElement;
+        Assert.Equal(32_768, root.GetProperty("max_completion_tokens").GetInt32());
+        Assert.Equal(expectedEffort, root.GetProperty("reasoning_effort").GetString());
+        Assert.False(root.TryGetProperty("max_tokens", out _));
+    }
+
+    [Theory]
+    [InlineData("custom", "gpt-5.6-sol")]
+    [InlineData("openai", "gpt-4.1")]
+    [InlineData("deepseek", "deepseek-chat")]
+    public async Task Other_provider_or_model_combinations_keep_legacy_max_tokens(
+        string providerId, string model)
+    {
+        string? body = null;
+        var provider = new OpenAiCompatibleProvider(new HttpClient(new CapturingHandler(value => body = value)));
+        var settings = new ProviderSettings(providerId, "https://model.example/v1", model,
+            MaxOutputTokens: 8_192, ReasoningEffort: "high");
+
+        await foreach (var _ in provider.StreamAsync(new([], settings, null), CancellationToken.None)) { }
+
+        using var document = JsonDocument.Parse(body!);
+        var root = document.RootElement;
+        Assert.Equal(8_192, root.GetProperty("max_tokens").GetInt32());
+        Assert.False(root.TryGetProperty("max_completion_tokens", out _));
+        Assert.False(root.TryGetProperty("reasoning_effort", out _));
+    }
+
     [Fact]
     public async Task Serializes_sanitized_image_only_in_current_request_content_array()
     {

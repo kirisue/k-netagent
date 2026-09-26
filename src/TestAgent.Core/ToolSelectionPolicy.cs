@@ -2,7 +2,8 @@ namespace TestAgent.Core;
 
 public static class ToolSelectionPolicy
 {
-    private static readonly string[] CoreTools = ["list_files", "read_file", "search_text"];
+    private static readonly string[] CoreTools =
+        ["list_files", "read_file", "search_text", "call_mcp_peer_tool"];
 
     public static IReadOnlyList<ToolDefinition> Select(
         IReadOnlyList<ToolDefinition> all, string userMessage, int maxActive = 8)
@@ -14,6 +15,9 @@ public static class ToolSelectionPolicy
         var selected = CoreTools.Where(byName.ContainsKey).Select(x => byName[x]).ToList();
         var groups = new[]
         {
+            Group(-1,["事件查看器","事件日志","系统日志","windows 事件","windows event","event log","event viewer","eventid"],["list_windows_event_channels","query_windows_events"],atomic:true),
+            Group(-1,["windows 服务","windows服务","系统服务","服务状态","service control manager","scm","service status","windows service"],["query_windows_services"]),
+            Group(0,["mcp","codex","claude","claude code","外部 agent","其他 agent","别的 agent","协作","借用工具","peer agent"],["list_mcp_peers","list_mcp_peer_tools"]),
             Group(0,["后台","异步","持续运行","background","async","long running"],["start_background_command","get_background_command","read_background_output","stop_background_command"],atomic:true),
             Group(0,["当前编辑器","活动编辑器","光标位置","可见行","active editor","current editor","selection"],["get_vscode_active_editor"]),
             Group(0,["诊断","问题面板","错误列表","diagnostic","diagnostics","problems"],["get_vscode_diagnostics"]),

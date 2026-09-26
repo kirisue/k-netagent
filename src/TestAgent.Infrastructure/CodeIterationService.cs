@@ -7,32 +7,6 @@ using TestAgent.Core;
 
 namespace TestAgent.Infrastructure;
 
-public sealed class WorkspaceLocator
-{
-    public string Root { get; }
-    public WorkspaceLocator()
-    {
-        Root = Find(Environment.CurrentDirectory) ?? Find(AppContext.BaseDirectory) ?? CreateInstalledWorkspace();
-    }
-    private static string? Find(string start)
-    {
-        for (var dir = new DirectoryInfo(start); dir is not null; dir = dir.Parent)
-            if (File.Exists(Path.Combine(dir.FullName, "TestAgent.slnx"))) return dir.FullName;
-        return null;
-    }
-
-    private static string CreateInstalledWorkspace()
-    {
-        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var parent = string.IsNullOrWhiteSpace(documents)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)
-            : documents;
-        var workspace = Path.GetFullPath(Path.Combine(parent, "K.netagent Workspace"));
-        Directory.CreateDirectory(workspace);
-        return workspace;
-    }
-}
-
 public sealed class MarkdownIterationGuideStore(WorkspaceLocator workspace) : IIterationGuideStore
 {
     public async Task<IReadOnlyList<IterationGuide>> ListAsync(CancellationToken ct = default)
@@ -176,6 +150,7 @@ public sealed class CodeIterationService(IModelProvider provider, WorkspaceLocat
         var extension = Path.GetExtension(relative); if (extension is not (".cs" or ".xaml" or ".md")) throw new InvalidDataException($"Unsupported target type: {relative}");
         var absolute = Path.GetFullPath(Path.Combine(workspace.Root, relative.Replace('/', Path.DirectorySeparatorChar)));
         if (!absolute.StartsWith(workspace.Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Target escapes workspace: {relative}");
+        WorkspaceTool.EnsureSafeWorkspacePath(workspace.Root, absolute);
         return new(relative, absolute, File.Exists(absolute));
     }
     private static string Normalize(string value) => value.Trim().Replace('\\', '/').TrimStart('/');
@@ -184,11 +159,37 @@ public sealed class CodeIterationService(IModelProvider provider, WorkspaceLocat
     private static void CopyWorkspace(string source, string target)
     {
         Directory.CreateDirectory(target);
-        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        var pending = new Stack<string>();
+        pending.Push(source);
+        var copiedFiles = 0;
+        long copiedBytes = 0;
+        while (pending.Count > 0)
         {
-            var relative = Path.GetRelativePath(source, file); var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (parts.Any(x => DeniedParts.Contains(x, StringComparer.OrdinalIgnoreCase)) || Path.GetFileName(file) is "v4_agent_config.json" or "v4_agent_history.json") continue;
-            var destination = Path.Combine(target, relative); Directory.CreateDirectory(Path.GetDirectoryName(destination)!); File.Copy(file, destination, true);
+            var directory = pending.Pop();
+            foreach (var child in Directory.EnumerateDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                var relative = Path.GetRelativePath(source, child);
+                var parts = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Any(part => DeniedParts.Contains(part, StringComparer.OrdinalIgnoreCase) ||
+                                      WorkspaceTool.IsUnavailablePart(part))) continue;
+                WorkspaceTool.EnsureSafeWorkspacePath(source, child);
+                pending.Push(child);
+            }
+            foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                if (WorkspaceTool.IsSensitiveFileName(Path.GetFileName(file))) continue;
+                WorkspaceTool.EnsureSafeWorkspacePath(source, file);
+                var relative = Path.GetRelativePath(source, file);
+                var info = new FileInfo(file);
+                copiedFiles++;
+                copiedBytes += info.Length;
+                if (copiedFiles > 20_000 || copiedBytes > 512L * 1024 * 1024)
+                    throw new InvalidDataException("The self-iteration workspace exceeds the bounded copy budget.");
+                var destination = Path.Combine(target, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(file, destination, true);
+            }
         }
     }
     private static async Task<ProcessResult> RunAsync(string file, string arguments, string cwd, TimeSpan timeout, CancellationToken ct)

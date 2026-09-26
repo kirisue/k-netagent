@@ -20,12 +20,27 @@ Recommended topics:
 dotnet wpf windows ai-agent llm openai-compatible desktop-app memory task-automation
 ```
 
-## Create the repository
+## Existing repository and version boundary
 
-1. Create a new empty public GitHub repository. Do not ask GitHub to generate a README, license, or `.gitignore`; this project already includes them.
-2. Start from a clean copy of this working tree that excludes `.git`, `artifacts`, `dist`, `memory`, `bin`, `obj`, logs, sessions, and local configuration.
-3. Initialize a new Git history in that clean copy. Do not push the current `kirisue/v4-agent` history because it belongs to the former Python project.
-4. Make the first commit, push `main`, then enable branch protection requiring the Windows CI job.
+The .NET repository already exists at `https://github.com/kirisue/k-netagent`.
+Do not reinitialize Git, replace its history, or push the former Python repository's
+history into it. The historical first release is WPF `v0.1.0`.
+
+The current WinUI artifact is a local `0.1.1-preview.20260926` installer, not an
+already published release. The shorthand `0.11` must be clarified before choosing
+an official tag: `0.1.1` and `0.11.0` are different versions. Local packaging does
+not authorize a commit, push, tag, or GitHub Release.
+
+Before preparing the next commit:
+
+- Review both tracked modifications and untracked source files; do not omit the
+  WinUI project, Windows diagnostic services, or their tests.
+- Exclude `artifacts`, `dist`, user memory, sessions, logs, credentials, `bin` and
+  `obj`. Keep generated EXEs as release assets rather than Git source files.
+- Review the complete proposed diff and run a secret scan. Pattern matching alone
+  is not proof that a repository contains no sensitive data.
+- Preserve the existing WPF release and clearly label the WinUI preview and its
+  unsupported features in README and release notes.
 
 ## Repository settings
 
@@ -33,11 +48,31 @@ dotnet wpf windows ai-agent llm openai-compatible desktop-app memory task-automa
 - Enable Dependabot security updates.
 - Require pull requests and the CI check before merging to `main`.
 - Keep workflow permissions minimal; the release workflow needs `contents: write` only for version tags.
-- Add an Authenticode certificate later if public releases must avoid the Windows SmartScreen unknown-publisher warning.
+- Plan Authenticode signing to identify the publisher and build signing reputation; signing a new file does not guarantee that SmartScreen will show no warning.
 
-## First release
+## Next WinUI preview release gates
 
-1. Confirm `dotnet test TestAgent.slnx -c Release` passes.
-2. Push tag `v0.1.0` from the clean repository.
-3. Verify the release contains only `k-netagent-0.1.0-win-x64-setup.exe` and its SHA-256 file.
-4. Download the release on a clean Windows 10/11 machine and verify install, launch, provider setup, chat, restart recovery, and uninstall.
+1. Confirm the exact version and obtain explicit publishing authorization.
+2. Align source version metadata, installer version, changelog and the intended
+   tag. Do not silently promote the preview to a stable release.
+3. Update and review the release workflow before pushing any `v*` tag. The current
+   workflow defaults to WPF, only collects the installer root directory, and does
+   not pass `--prerelease`; it is not the WinUI preview publishing path.
+4. Run the tests and inspect the TRX counters to prove that tests actually executed.
+   Build WinUI XAML in Release and package with `-Desktop WinUI`. Validate bundled
+   .NET / Windows App SDK files and the matching XBF / PRI resources.
+5. Verify the final EXE hash, install, launch both diagnostic shortcuts, reinstall,
+   uninstall, and preservation of user data. Keep the preview's product identity
+   separate from WPF; shared `%LOCALAPPDATA%\TestAgent` data still needs a
+   cross-version compatibility test.
+6. Perform clean-machine and real-provider GUI acceptance separately. A test pass,
+   a live process, or an accessibility tree alone does not prove the complete GUI
+   works. Follow `docs/winui3-ui-acceptance.md` and report missing evidence.
+7. Document the unsigned-installer warning and the browser's Evergreen WebView2
+   Runtime dependency. .NET and Windows App SDK are bundled; Git and the .NET SDK
+   remain optional dependencies for development-related features.
+8. Upload only the approved installer and checksum, plus deliberately reviewed
+   release metadata. Local validation manifests may contain machine paths and
+   must not be uploaded without review.
+
+No commit, tag, push, or release is performed by this checklist.

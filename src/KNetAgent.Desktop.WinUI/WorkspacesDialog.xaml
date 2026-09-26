@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="KNetAgent.Desktop.WinUI.WorkspacesDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="项目与工作区"
+    CloseButtonText="关闭"
+    DefaultButton="Close"
+    MaxWidth="960"
+    Loaded="WorkspacesDialog_Loaded">
+
+    <ScrollViewer
+        MaxHeight="680"
+        HorizontalAlignment="Stretch"
+        HorizontalContentAlignment="Stretch"
+        HorizontalScrollBarVisibility="Disabled"
+        VerticalScrollBarVisibility="Auto">
+        <Grid x:Name="WorkspaceDialogRoot" Padding="0,4,0,2" RowSpacing="12">
+            <VisualStateManager.VisualStateGroups>
+                <VisualStateGroup x:Name="ResponsiveLayoutStates">
+                    <VisualState x:Name="NarrowLayout">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="0" />
+                        </VisualState.StateTriggers>
+                    </VisualState>
+                    <VisualState x:Name="WideLayout">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="760" />
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="WorkspacePanelsGrid.ColumnSpacing" Value="14" />
+                            <Setter Target="WorkspacePanelsGrid.RowSpacing" Value="0" />
+                            <Setter Target="RecentWorkspacesColumn.Width" Value="3*" />
+                            <Setter Target="CreateWorkspaceColumn.Width" Value="2*" />
+                            <Setter Target="WorkspacePanelsFirstRow.Height" Value="*" />
+                            <Setter Target="WorkspacePanelsSecondRow.Height" Value="0" />
+                            <Setter Target="CreateWorkspacePanel.(Grid.Row)" Value="0" />
+                            <Setter Target="CreateWorkspacePanel.(Grid.Column)" Value="1" />
+                            <Setter Target="CreateWorkspacePanel.Margin" Value="0" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Spacing="4">
+                <TextBlock
+                    Text="为 K.netagent 选择一个真实的本地工作目录。文件、命令、VS Code 与外部 Agent 都会限定在该目录。"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Text="切换会重新启动应用。生成、未发送输入或后台命令存在时不会切换；选择目录本身不会批准任何写入。"
+                    TextWrapping="Wrap"
+                    FontSize="11"
+                    Foreground="{StaticResource KNetTextSecondaryBrush}" />
+            </StackPanel>
+
+            <Border
+                Grid.Row="1"
+                Padding="12"
+                CornerRadius="10"
+                Background="{StaticResource KNetSurfaceBrush}"
+                BorderBrush="{StaticResource KNetBorderBrush}"
+                BorderThickness="1">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE8B7;" FontSize="18" Foreground="{StaticResource KNetAccentBrush}" />
+                    <StackPanel Grid.Column="1" Spacing="2">
+                        <TextBlock Text="当前工作区" Style="{StaticResource KNetSectionLabelStyle}" />
+                        <TextBlock Text="{Binding CurrentWorkspaceName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Text="{Binding CurrentWorkspacePath}"
+                            FontSize="11"
+                            Foreground="{StaticResource KNetTextSecondaryBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            ToolTipService.ToolTip="{Binding CurrentWorkspacePath}" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="2"
+                        Content="打开文件夹…"
+                        Click="OpenFolder_Click"
+                        Style="{StaticResource KNetSurfaceButtonStyle}" />
+                </Grid>
+            </Border>
+
+            <InfoBar
+                x:Name="WorkspaceErrorBar"
+                Grid.Row="2"
+                IsOpen="False"
+                IsClosable="True"
+                Severity="Error" />
+
+            <Grid x:Name="WorkspacePanelsGrid" Grid.Row="3" RowSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="RecentWorkspacesColumn" Width="*" />
+                    <ColumnDefinition x:Name="CreateWorkspaceColumn" Width="0" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="WorkspacePanelsFirstRow" Height="Auto" />
+                    <RowDefinition x:Name="WorkspacePanelsSecondRow" Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    x:Name="RecentWorkspacesPanel"
+                    Padding="12"
+                    CornerRadius="10"
+                    Background="{StaticResource KNetSurfaceBrush}"
+                    BorderBrush="{StaticResource KNetBorderBrush}"
+                    BorderThickness="1">
+                    <Grid RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="最近项目" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <Button
+                                Grid.Column="1"
+                                Content="刷新"
+                                Click="RefreshWorkspaces_Click"
+                                Style="{StaticResource KNetSurfaceButtonStyle}" />
+                        </Grid>
+                        <ListView
+                            x:Name="RecentWorkspacesList"
+                            Grid.Row="1"
+                            ItemsSource="{Binding RecentWorkspaces}"
+                            SelectionMode="None"
+                            MaxHeight="300"
+                            Background="Transparent">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,0,6" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Padding="8" ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock
+                                                Text="{Binding Root}"
+                                                FontSize="11"
+                                                Foreground="{StaticResource KNetTextSecondaryBrush}"
+                                                TextTrimming="CharacterEllipsis"
+                                                ToolTipService.ToolTip="{Binding Root}" />
+                                        </StackPanel>
+                                        <Button
+                                            Grid.Column="1"
+                                            Content="打开"
+                                            Click="OpenRecentWorkspace_Click"
+                                            Style="{StaticResource KNetSurfaceButtonStyle}" />
+                                        <Button
+                                            Grid.Column="2"
+                                            Content="忘记"
+                                            Click="ForgetWorkspace_Click"
+                                            Style="{StaticResource KNetSurfaceButtonStyle}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <Border
+                    x:Name="CreateWorkspacePanel"
+                    Grid.Row="1"
+                    Margin="0"
+                    Padding="12"
+                    CornerRadius="10"
+                    Background="{StaticResource KNetSurfaceBrush}"
+                    BorderBrush="{StaticResource KNetBorderBrush}"
+                    BorderThickness="1">
+                    <StackPanel Spacing="9">
+                        <TextBlock Text="创建新项目" FontWeight="SemiBold" />
+                        <TextBlock
+                            Text="新建一个空目录并将它作为工作区。K.netagent 不会自动生成模板、初始化 Git 或下载依赖。"
+                            TextWrapping="Wrap"
+                            FontSize="11"
+                            Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                        <TextBox
+                            x:Name="ProjectNameBox"
+                            Header="项目名称"
+                            PlaceholderText="例如 MyProject"
+                            MaxLength="100" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="ParentFolderBox"
+                                Header="创建位置"
+                                IsReadOnly="True"
+                                ToolTipService.ToolTip="{Binding Text, ElementName=ParentFolderBox}" />
+                            <Button
+                                Grid.Column="1"
+                                Content="浏览…"
+                                Click="BrowseParentFolder_Click"
+                                VerticalAlignment="Bottom"
+                                Style="{StaticResource KNetSurfaceButtonStyle}" />
+                        </Grid>
+                        <Button
+                            x:Name="CreateWorkspaceButton"
+                            Content="创建并打开"
+                            Click="CreateWorkspace_Click"
+                            HorizontalAlignment="Stretch"
+                            Style="{StaticResource KNetPrimaryButtonStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <TextBlock
+                Grid.Row="4"
+                Text="工作区路径保存在当前 Windows 用户的本地应用数据中；API Key 仍由 DPAPI 独立保护。"
+                TextWrapping="Wrap"
+                FontSize="11"
+                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+        </Grid>
+    </ScrollViewer>
+</ContentDialog>

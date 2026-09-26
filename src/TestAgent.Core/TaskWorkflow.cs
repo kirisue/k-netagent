@@ -36,7 +36,21 @@ public interface IProjectScanner
 public interface ITaskPlanStore : ITaskGraphCheckpointStore
 {
     Task<IReadOnlyList<TaskGraphPlan>> ListPlansAsync(CancellationToken cancellationToken = default);
+    async Task<IReadOnlyList<TaskGraphPlan>> ListPlansAsync(string? workspaceId,
+        CancellationToken cancellationToken = default) =>
+        (await ListPlansAsync(cancellationToken)).Where(plan =>
+            string.IsNullOrWhiteSpace(workspaceId)
+                ? string.IsNullOrWhiteSpace(plan.WorkspaceId)
+                : string.Equals(plan.WorkspaceId, workspaceId, StringComparison.OrdinalIgnoreCase)).ToArray();
     Task<TaskGraphPlan?> LoadPlanAsync(string graphId, CancellationToken cancellationToken = default);
+    async Task<TaskGraphPlan?> LoadPlanAsync(string graphId, string? workspaceId,
+        CancellationToken cancellationToken = default)
+    {
+        var plan = await LoadPlanAsync(graphId, cancellationToken);
+        return string.IsNullOrWhiteSpace(workspaceId)
+            ? string.IsNullOrWhiteSpace(plan?.WorkspaceId) ? plan : null
+            : string.Equals(plan?.WorkspaceId, workspaceId, StringComparison.OrdinalIgnoreCase) ? plan : null;
+    }
     Task SavePlanAsync(TaskGraphPlan plan, CancellationToken cancellationToken = default);
 }
 

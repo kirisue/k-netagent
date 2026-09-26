@@ -42,6 +42,35 @@ public sealed class AgentRuntimeTests
         var result=await runtime.RunAsync(AgentRuntime.NewSession(),"hello",new("custom","http://localhost/v1","fake"),null,observer,CancellationToken.None);
         Assert.Equal(AgentState.Completed,result.State);Assert.Equal("answer",result.Content);Assert.Equal(2,result.Session.Messages.Count);Assert.NotNull(sessions.Value);
     }
+    [Fact] public async Task Runtime_rejects_a_session_from_another_workspace_before_mutation()
+    {
+        var provider=new CapturingImageProvider();var sessions=new MemorySessions();var source=AgentRuntime.NewSession("workspace-a");
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),sessions,new NoTools());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(()=>runtime.RunAsync(source,"hello",
+            new("custom","https://model.example/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None,
+            new AgentRunOptions(WorkspaceId:"workspace-b")));
+
+        Assert.Empty(source.Messages);Assert.Equal(0,sessions.SaveCount);Assert.Empty(provider.Requests);
+    }
+    [Fact] public async Task Runtime_binds_a_legacy_session_and_injects_only_matching_workspace_memory()
+    {
+        var now=DateTimeOffset.UtcNow;var provider=new CapturingImageProvider();var sessions=new MemorySessions();
+        var memories=new StaticMemories([
+            new("user","user","USER-MARKER",true,now,MemoryScope.User),
+            new("project-a","project a","PROJECT-A-MARKER",true,now,MemoryScope.Project,WorkspaceId:"workspace-a"),
+            new("project-b","project b","PROJECT-B-MARKER",true,now,MemoryScope.Project,WorkspaceId:"workspace-b")]);
+        var runtime=new AgentRuntime(provider,memories,sessions,new NoTools());var legacy=AgentRuntime.NewSession();
+
+        var result=await runtime.RunAsync(legacy,"hello",
+            new("custom","https://model.example/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None,
+            new AgentRunOptions(WorkspaceId:"workspace-a"));
+
+        Assert.Equal("workspace-a",result.Session.WorkspaceId);Assert.Equal(2,result.Session.Version);
+        Assert.Equal("workspace-a",sessions.Value!.WorkspaceId);
+        var context=string.Join("\n",Assert.Single(provider.Requests).Messages.Select(message=>message.Content));
+        Assert.Contains("USER-MARKER",context);Assert.Contains("PROJECT-A-MARKER",context);Assert.DoesNotContain("PROJECT-B-MARKER",context);
+    }
     [Fact] public async Task Runtime_forwards_image_only_to_provider_and_never_persists_image_bytes()
     {
         var bytes=new byte[]{9,8,7,6};var image=new ImageInput("image/png",bytes,"HASH",1,1);var provider=new CapturingImageProvider();var sessions=new MemorySessions();
@@ -116,6 +145,84 @@ public sealed class AgentRuntimeTests
         var result=await runtime.RunAsync(AgentRuntime.NewSession(),"inspect",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
         Assert.Equal(AgentState.Completed,result.State);Assert.Equal(2,tools.Requests.Count);Assert.Contains(provider.Requests.Last().Messages,x=>x.Role==ChatRole.Tool&&x.Content.Contains("repeated identical",StringComparison.OrdinalIgnoreCase));
     }
+    [Fact] public async Task Escalation_success_synthesizes_silently_and_does_not_persist_raw_peer_output()
+    {
+        const string rawPeerOutput="RAW UNTRUSTED PEER EVIDENCE";var provider=new EscalationProvider();
+        var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Success,rawPeerOutput));
+        var evaluator=new FakeEscalationEvaluator(new(true,85,["verification failed"],"codex-local","Review the draft and provide read-only evidence."));
+        var observer=new CapturingObserver();var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"finish the task",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,observer,CancellationToken.None);
+        Assert.Equal("synthesized answer",result.Content);Assert.Equal(1,evaluator.CallCount);Assert.Single(tools.Requests);
+        Assert.Equal("call_mcp_peer_tool",tools.Requests[0].Name);Assert.Equal(2,provider.Requests.Count);Assert.Empty(provider.Requests[1].Tools!);
+        Assert.Contains(rawPeerOutput,provider.Requests[1].Messages.Last().Content);Assert.DoesNotContain(rawPeerOutput,JsonSerializer.Serialize(result.Session));
+        Assert.Contains(observer.Events,x=>x.Kind==StreamEventKind.Escalation&&x.Escalation?.Score==85);
+        Assert.Contains(observer.Events,x=>x.Kind==StreamEventKind.Revision&&x.Text=="synthesized answer");
+        using var arguments=JsonDocument.Parse(tools.Requests[0].ArgumentsJson);
+        Assert.Equal("codex-local",arguments.RootElement.GetProperty("peerId").GetString());Assert.Equal("codex",arguments.RootElement.GetProperty("toolName").GetString());
+    }
+    [Fact] public async Task Rejected_escalation_keeps_draft_and_does_not_request_synthesis()
+    {
+        var provider=new EscalationProvider();var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Blocked,"","User rejected.",ErrorCode:"user_rejected"));
+        var evaluator=new FakeEscalationEvaluator(new(true,90,["needs specialist"],"codex-local","Review it."));
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"finish the task",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
+        Assert.Equal("draft answer",result.Content);Assert.Single(provider.Requests);Assert.Single(tools.Requests);
+        Assert.False(result.Escalation!.ShouldEscalate);Assert.Equal("user_rejected",result.Escalation.SuppressedReason);
+    }
+    [Fact] public async Task Escalation_is_suppressed_when_gateway_tool_is_unavailable()
+    {
+        var evaluator=new FakeEscalationEvaluator(new(true,90,["needs specialist"],"codex-local","Review it."));
+        var runtime=new AgentRuntime(new FakeProvider(),new MemoryMemories(),new MemorySessions(),new NoTools(),escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"finish the task",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
+        Assert.Equal("answer",result.Content);Assert.Equal(1,evaluator.CallCount);Assert.False(result.Escalation!.ShouldEscalate);
+        Assert.Equal("escalation_tool_unavailable",result.Escalation.SuppressedReason);
+    }
+    [Fact] public async Task Image_run_does_not_add_an_unbounded_fifth_model_request_for_escalation()
+    {
+        var provider=new EscalationProvider();var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Success,"peer"));
+        var evaluator=new FakeEscalationEvaluator(new(true,100,["needs specialist"],"codex-local","Review it."));
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var image=new ImageInput("image/png",[1],"HASH",1,1);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"inspect",new("custom","http://localhost/v1","vision",SelfReviewEnabled:false,SupportsImageInput:true),null,new Observer(),CancellationToken.None,new AgentRunOptions(Images:[image]));
+        Assert.Equal("draft answer",result.Content);Assert.Single(provider.Requests);Assert.Empty(tools.Requests);
+        Assert.False(result.Escalation!.ShouldEscalate);Assert.Equal("image_escalation_not_supported",result.Escalation.SuppressedReason);
+    }
+    [Fact] public async Task Failed_escalation_is_attempted_only_once_and_keeps_draft()
+    {
+        var provider=new EscalationProvider();var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Failed,"","peer failed",ErrorCode:"peer_call_failed"));
+        var evaluator=new FakeEscalationEvaluator(new(true,90,["verification failed"],"codex-local","Review it."));
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"finish the task",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
+        Assert.Equal("draft answer",result.Content);Assert.Equal(1,evaluator.CallCount);Assert.Single(tools.Requests);Assert.Single(provider.Requests);
+        Assert.False(result.Escalation!.ShouldEscalate);Assert.Equal("peer_call_failed",result.Escalation.SuppressedReason);
+    }
+    [Fact] public async Task Cancelled_run_never_evaluates_or_calls_escalation()
+    {
+        var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Success,"peer"));
+        var evaluator=new FakeEscalationEvaluator(new(true,100,["requested"],"codex-local","Review it."));
+        var runtime=new AgentRuntime(new FakeProvider(),new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        using var cancellation=new CancellationTokenSource();cancellation.Cancel();
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"finish it",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),cancellation.Token);
+        Assert.Equal(AgentState.Cancelled,result.State);Assert.Equal(0,evaluator.CallCount);Assert.Empty(tools.Requests);
+    }
+    [Fact] public async Task Earlier_user_rejection_hard_suppresses_automatic_escalation()
+    {
+        var provider=new ToolCallingProvider();var tools=new RejectingInitialTools();
+        var evaluator=new FakeEscalationEvaluator(new(true,100,["tool failed"],"codex-local","Ask another Agent."));
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"read it",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
+        Assert.Equal("final",result.Content);Assert.Single(tools.Requests);Assert.Equal("read_file",tools.Requests[0].Name);
+        Assert.False(result.Escalation!.ShouldEscalate);Assert.Equal("user_rejected",result.Escalation.SuppressedReason);
+        Assert.Contains(evaluator.Context!.Signals,x=>x.Kind==EscalationSignalKind.UserRejected);
+    }
+    [Fact] public async Task Runtime_never_auto_repeats_a_peer_call_already_attempted_by_the_model()
+    {
+        var provider=new PeerToolCallingProvider();var tools=new EscalationTools(new("ignored","ignored",ToolExecutionStatus.Success,"peer evidence"));
+        var evaluator=new FakeEscalationEvaluator(new(true,100,["explicit"],"codex-local","Review again."));
+        var runtime=new AgentRuntime(provider,new MemoryMemories(),new MemorySessions(),tools,escalationEvaluator:evaluator);
+        var result=await runtime.RunAsync(AgentRuntime.NewSession(),"ask Codex",new("custom","http://localhost/v1","fake",SelfReviewEnabled:false),null,new Observer(),CancellationToken.None);
+        Assert.Equal("model final",result.Content);Assert.Single(tools.Requests);Assert.Equal("peer_already_called",result.Escalation!.SuppressedReason);
+    }
     private sealed class FakeProvider:IModelProvider{public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){yield return new(StreamEventKind.Reasoning,"think");yield return new(StreamEventKind.Content,"answer");yield return new(StreamEventKind.Usage,Tokens:3);await Task.CompletedTask;}}
     private sealed class CapturingImageProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);yield return new(StreamEventKind.Content,"image answer");await Task.CompletedTask;}}
     private sealed class RevisingProvider:IModelProvider{private int _calls;public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){_calls++;yield return new(StreamEventKind.Content,_calls==1?"draft":"{\"accept\":false,\"revisedAnswer\":\"better answer\"}");await Task.CompletedTask;}}
@@ -123,9 +230,16 @@ public sealed class AgentRuntimeTests
     private sealed class AlwaysToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);if(r.Tools is {Count:>0})yield return new(StreamEventKind.Completed,ToolCall:new($"call-{Requests.Count}","read_file","{\"path\":\"README.md\"}"));else yield return new(StreamEventKind.Content,"bounded final");await Task.CompletedTask;}}
     private sealed class TwoToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);if(Requests.Count==1){yield return new(StreamEventKind.Completed,ToolCall:new("call-a","read_file","{\"path\":\"README.md\"}"));yield return new(StreamEventKind.Completed,ToolCall:new("call-b","read_file","{\"path\":\"README.md\"}"));}else yield return new(StreamEventKind.Content,"done");await Task.CompletedTask;}}
     private sealed class ReorderedRepeatedToolProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);var call=Requests.Count switch{1=>new ModelToolCall("one","read_file","{\"path\":\"README.md\",\"startLine\":1}"),2=>new ModelToolCall("two","read_file","{\"startLine\":1,\"path\":\"README.md\"}"),3=>new ModelToolCall("three","read_file","{ \"path\": \"README.md\", \"startLine\": 1 }"),_=>null};if(call is not null)yield return new(StreamEventKind.Completed,ToolCall:call);else yield return new(StreamEventKind.Content,"done");await Task.CompletedTask;}}
+    private sealed class EscalationProvider:IModelProvider{public List<ChatRequest> Requests{get;}=[];public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){Requests.Add(r);yield return new(StreamEventKind.Content,Requests.Count==1?"draft answer":"synthesized answer");await Task.CompletedTask;}}
+    private sealed class PeerToolCallingProvider:IModelProvider{private int calls;public async IAsyncEnumerable<StreamEvent> StreamAsync(ChatRequest r,[System.Runtime.CompilerServices.EnumeratorCancellation]CancellationToken c){calls++;if(calls==1)yield return new(StreamEventKind.Completed,ToolCall:new("peer-1","call_mcp_peer_tool","{\"peerId\":\"codex-local\",\"toolName\":\"codex\",\"task\":\"Review\"}"));else yield return new(StreamEventKind.Content,"model final");await Task.CompletedTask;}}
+    private sealed class FakeEscalationEvaluator(EscalationDecision decision):IEscalationEvaluator{public int CallCount{get;private set;}public EscalationContext? Context{get;private set;}public Task<EscalationDecision> EvaluateAsync(EscalationContext context,CancellationToken c=default){CallCount++;Context=context;return Task.FromResult(decision);}}
+    private sealed class EscalationTools(ToolResult result):IToolExecutionService{public List<ToolRequest> Requests{get;}=[];public IReadOnlyList<ToolDefinition> GetDefinitions()=>[new("call_mcp_peer_tool","peer",ToolRiskLevel.ProcessExecution,[])];public Task<ToolResult> ExecuteAsync(ToolRequest r,IAgentObserver o,CancellationToken c=default){Requests.Add(r);return Task.FromResult(result with{RequestId=r.Id,ToolName=r.Name});}}
+    private sealed class RejectingInitialTools:IToolExecutionService{public List<ToolRequest> Requests{get;}=[];public IReadOnlyList<ToolDefinition> GetDefinitions()=>[new("read_file","read",ToolRiskLevel.ReadOnly,[]),new("call_mcp_peer_tool","peer",ToolRiskLevel.ProcessExecution,[])];public Task<ToolResult> ExecuteAsync(ToolRequest r,IAgentObserver o,CancellationToken c=default){Requests.Add(r);return Task.FromResult(new ToolResult(r.Id,r.Name,ToolExecutionStatus.Blocked,"","User rejected.",ErrorCode:"user_rejected"));}}
     private sealed class MemoryMemories:IMemoryStore{public Task DeleteAsync(string id,CancellationToken c=default)=>Task.CompletedTask;public Task<IReadOnlyList<MemoryEntry>> ListAsync(CancellationToken c=default)=>Task.FromResult<IReadOnlyList<MemoryEntry>>([]);public Task SaveAsync(MemoryEntry m,CancellationToken c=default)=>Task.CompletedTask;}
+    private sealed class StaticMemories(IReadOnlyList<MemoryEntry> values):IMemoryStore{public Task DeleteAsync(string id,CancellationToken c=default)=>Task.CompletedTask;public Task<IReadOnlyList<MemoryEntry>> ListAsync(CancellationToken c=default)=>Task.FromResult(values);public Task SaveAsync(MemoryEntry m,CancellationToken c=default)=>Task.CompletedTask;}
     private sealed class MemorySessions:ISessionStore{public ChatSession? Value;public int SaveCount;public Task DeleteAsync(string id,CancellationToken c=default)=>Task.CompletedTask;public Task<ChatSession?> GetAsync(string id,CancellationToken c=default)=>Task.FromResult(Value);public Task<IReadOnlyList<ChatSession>> ListAsync(CancellationToken c=default)=>Task.FromResult<IReadOnlyList<ChatSession>>(Value is null?[]:[Value]);public Task SaveAsync(ChatSession s,CancellationToken c=default){SaveCount++;Value=s;return Task.CompletedTask;}}
     private sealed class Observer:IAgentObserver{public ValueTask OnEventAsync(StreamEvent v)=>ValueTask.CompletedTask;public ValueTask OnStateAsync(AgentState s)=>ValueTask.CompletedTask;public ValueTask<bool> RequestToolApprovalAsync(ToolApprovalRequest r,CancellationToken c)=>ValueTask.FromResult(true);}
+    private sealed class CapturingObserver:IAgentObserver{public List<StreamEvent> Events{get;}=[];public ValueTask OnEventAsync(StreamEvent v){Events.Add(v);return ValueTask.CompletedTask;}public ValueTask OnStateAsync(AgentState s)=>ValueTask.CompletedTask;public ValueTask<bool> RequestToolApprovalAsync(ToolApprovalRequest r,CancellationToken c)=>ValueTask.FromResult(true);}
     private sealed class NoTools:IToolExecutionService{public IReadOnlyList<ToolDefinition> GetDefinitions()=>[];public Task<ToolResult> ExecuteAsync(ToolRequest r,IAgentObserver o,CancellationToken c=default)=>Task.FromResult(new ToolResult(r.Id,r.Name,ToolExecutionStatus.Failed,"","No tools."));}
     private sealed class CapturingTools:IToolExecutionService{public List<ToolRequest> Requests{get;}=[];public IReadOnlyList<ToolDefinition> GetDefinitions()=>[new("read_file","read",ToolRiskLevel.ReadOnly,[])];public Task<ToolResult> ExecuteAsync(ToolRequest r,IAgentObserver o,CancellationToken c=default){Requests.Add(r);return Task.FromResult(new ToolResult(r.Id,r.Name,ToolExecutionStatus.Success,"file contents"));}}
     private sealed class ThrowingToolSessions:IToolSessionCoordinator{public Task<IReadOnlyList<ToolSession>> EnsureSessionsAsync(string p,IReadOnlyList<ToolDefinition>d,CancellationToken c=default)=>Task.FromException<IReadOnlyList<ToolSession>>(new IOException("unavailable"));public Task<ToolSession> StartAsync(ToolRequest r,bool a,CancellationToken c=default)=>Task.FromException<ToolSession>(new IOException("unavailable"));public Task<ToolSession> CompleteAsync(ToolSession s,ToolRequest r,ToolResult x,bool a,CancellationToken c=default)=>Task.FromException<ToolSession>(new IOException("unavailable"));public Task<string?> GetStrategyHintAsync(string p,string n,CancellationToken c=default)=>Task.FromException<string?>(new IOException("unavailable"));public Task<IReadOnlyList<ToolSession>> ListAsync(string? p=null,CancellationToken c=default)=>Task.FromException<IReadOnlyList<ToolSession>>(new IOException("unavailable"));public Task<ToolSession>AcknowledgeNeedsReviewAsync(string p,string n,CancellationToken c=default)=>Task.FromException<ToolSession>(new IOException("unavailable"));}

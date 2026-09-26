@@ -110,9 +110,15 @@ public sealed class OpenAiCompatibleProvider(HttpClient http) : IModelProvider
             var payload = new Dictionary<string, object?>
             {
                 ["model"] = request.Settings.Model, ["stream"] = true,
-                ["stream_options"] = new { include_usage = true }, ["max_tokens"] = request.Settings.MaxOutputTokens,
+                ["stream_options"] = new { include_usage = true },
                 ["messages"] = ToWireMessages(request, images)
             };
+            if (UsesOpenAiGpt56ChatParameters(request.Settings))
+            {
+                payload["max_completion_tokens"] = request.Settings.MaxOutputTokens;
+                payload["reasoning_effort"] = ProviderSettings.NormalizeReasoningEffort(request.Settings.ReasoningEffort);
+            }
+            else payload["max_tokens"] = request.Settings.MaxOutputTokens;
             if (request.Tools is { Count: > 0 }) payload["tools"] = request.Tools.Select(ToWireTool).ToArray();
             var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json") };
             if (!string.IsNullOrWhiteSpace(request.ApiKey)) message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", request.ApiKey);
@@ -124,6 +130,10 @@ public sealed class OpenAiCompatibleProvider(HttpClient http) : IModelProvider
             if(images is not null)foreach(var image in images)CryptographicOperations.ZeroMemory(image.Data);
         }
     }
+
+    private static bool UsesOpenAiGpt56ChatParameters(ProviderSettings settings) =>
+        settings.ProviderId.Trim().Equals("openai", StringComparison.OrdinalIgnoreCase) &&
+        settings.Model.Trim().StartsWith("gpt-5.6", StringComparison.OrdinalIgnoreCase);
 
     private static object[] ToWireMessages(ChatRequest request, IReadOnlyList<ImageInput>? images)
     {

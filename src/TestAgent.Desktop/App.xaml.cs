@@ -65,7 +65,8 @@ public partial class App : Application
         services.AddSingleton<IAgentTool, ReadBrowserDomTool>();
         services.AddSingleton<IAgentTool, CaptureBrowserViewportTool>();
         services.AddSingleton<IToolRegistry, ToolRegistry>(); services.AddSingleton<IToolAuditStore, JsonlToolAuditStore>(); services.AddSingleton<IToolExecutionService, ToolExecutionService>();
-        services.AddHttpClient<IModelProvider, OpenAiCompatibleProvider>()
+        services.AddHttpClient<IModelProvider, OpenAiCompatibleProvider>(client =>
+                client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
         services.AddSingleton<IAgentRuntime>(sp => new AgentRuntime(
             sp.GetRequiredService<IModelProvider>(), sp.GetRequiredService<IMemoryStore>(), sp.GetRequiredService<ISessionStore>(),

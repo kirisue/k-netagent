@@ -165,6 +165,36 @@ public sealed class WebAndMemoryTests
     }
 
     [Fact]
+    public async Task Session_history_search_returns_only_the_active_workspace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "KNetAgent-history-workspace-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var workspace = new WorkspaceLocator(root);
+            var now = DateTimeOffset.UtcNow;
+            var sessions = new InMemorySessionStore(
+            [
+                Session("matching", "Matching", new ChatMessage(ChatRole.User, "workspace needle", now))
+                    with { WorkspaceId = workspace.Id },
+                Session("other", "Other", new ChatMessage(ChatRole.User, "workspace needle", now.AddMinutes(-1)))
+                    with { WorkspaceId = "WS-OTHER" },
+                Session("legacy", "Legacy", new ChatMessage(ChatRole.User, "workspace needle", now.AddMinutes(-2)))
+            ]);
+
+            var results = await new SessionHistorySearch(sessions, workspace)
+                .SearchAsync("needle", maxResults: 10);
+
+            var hit = Assert.Single(results);
+            Assert.Equal("matching", hit.SessionId);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void Build_context_injects_only_the_memory_set_selected_for_the_current_scope()
     {
         var now = DateTimeOffset.UtcNow;

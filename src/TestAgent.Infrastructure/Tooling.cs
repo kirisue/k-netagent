@@ -98,6 +98,9 @@ public sealed class ToolExecutionService(IToolRegistry registry, IToolAuditStore
                 "get_vscode_diagnostics" => VsCodeLiveApprovalSummary("diagnostic metadata"),
                 "list_vscode_available_tasks" => VsCodeLiveApprovalSummary("fetchTasks metadata; installed task providers may be awakened, but no task will execute"),
                 "list_vscode_installed_extensions" => VsCodeLiveApprovalSummary("installed extension metadata; no extension will be activated, installed, updated, or removed"),
+                "call_mcp_peer_tool" => McpPeerApprovalSummary(root, Text, Preview),
+                "query_windows_events" => "本机 Windows 事件查询\n仅允许 Application / System，最多 200 条。\n返回时间、来源、事件 ID 与级别等元数据，结果会交给当前模型 Provider；事件正文与原始 XML 不会返回。\n筛选条件：\n" + RedactArguments(value),
+                "query_windows_services" => "本机 Windows 服务只读查询\n仅返回服务名、显示名、当前状态、启动类型和依赖项（最多 100 条），不读取服务账户或可执行文件路径，不启动、停止或修改服务。\n这些元数据会交给当前模型 Provider。\n筛选条件：\n" + RedactArguments(value),
                 _ => RedactArguments(value)
             };
         }
@@ -122,6 +125,29 @@ public sealed class ToolExecutionService(IToolRegistry registry, IToolAuditStore
 
     private static string VsCodeLiveApprovalSummary(string value) =>
         $"LocalEnvironmentRead approval\nRead bounded {value} from the paired trusted local VS Code workspace.\nNo file text, absolute path, command, arguments, environment values, task execution, write, or extension mutation is permitted.";
+
+    private static string McpPeerApprovalSummary(JsonElement root, Func<string, string> text,
+        Func<string, int, string> preview)
+    {
+        var peerId = text("peerId") switch { "" => "(the only connected peer)", var value => value };
+        var toolName = text("toolName") switch { "" => "(peer default)", var value => value };
+        var task = text("task");
+        if (string.IsNullOrWhiteSpace(task)) task = text("prompt");
+        if (string.IsNullOrWhiteSpace(task) && root.TryGetProperty("arguments", out var arguments) &&
+            arguments.ValueKind == JsonValueKind.Object)
+        {
+            if (arguments.TryGetProperty("task", out var nestedTask) && nestedTask.ValueKind == JsonValueKind.String)
+                task = nestedTask.GetString() ?? "";
+            else if (arguments.TryGetProperty("prompt", out var nestedPrompt) && nestedPrompt.ValueKind == JsonValueKind.String)
+                task = nestedPrompt.GetString() ?? "";
+        }
+
+        var details = string.IsNullOrWhiteSpace(task)
+            ? "Arguments (sensitive values redacted):\n" + SensitiveDataRedactor.Arguments(
+                root.TryGetProperty("arguments", out var raw) ? raw.GetRawText() : "{}", 800)
+            : $"Delegated task ({task.Length} chars):\n{preview(task, 800)}";
+        return $"External Agent / MCP approval\nPeer: {preview(peerId, 160)}\nTool: {preview(toolName, 160)}\n{details}\n\nThe peer is already user-connected. This approval covers one call only. The peer may read files in the current workspace and send selected content to its own configured model service. Successful bounded text output will then be sent to K.netagent's currently selected model Provider for one synthesis request. Do not approve if that data must not leave either Provider; external output remains untrusted and K.netagent will not auto-replay it.";
+    }
 
     private static string EditApprovalSummary(JsonElement root, Func<string, string> text,
         Func<string, int, string> preview)
@@ -220,15 +246,19 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
         try { using var stream=File.OpenRead(path);var buffer=new byte[Math.Min(4096,(int)Math.Min(stream.Length,4096))];var read=stream.Read(buffer,0,buffer.Length);return buffer.AsSpan(0,read).Contains((byte)0); }
         catch{return true;}
     }
-    private void EnsurePathPolicy(string fullPath)
+    private void EnsurePathPolicy(string fullPath) =>
+        EnsureSafeWorkspacePath(Root, fullPath, AllowVsCodeStructuredConfig);
+
+    internal static void EnsureSafeWorkspacePath(string root, string fullPath,
+        bool allowVsCodeStructuredConfig = false)
     {
-        if (fullPath != Root && !fullPath.StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        if (fullPath != root && !fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Path escapes the workspace.");
-        var relative = Path.GetRelativePath(Root, fullPath);
+        var relative = Path.GetRelativePath(root, fullPath);
         var parts = relative == "." ? [] : relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Any(IsUnavailablePart))
+        if (parts.Any(part => IsUnavailablePart(part, allowVsCodeStructuredConfig)))
             throw new InvalidDataException("Sensitive or protected paths are not available to tools.");
-        EnsureNoReparsePoints(fullPath);
+        EnsureNoReparsePoints(root, fullPath);
     }
     private void EnsureAllowedScope(string fullPath, IReadOnlyList<string>? allowedPaths)
     {
@@ -250,10 +280,10 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
         }
         throw new InvalidDataException("Path is outside the current task's allowed context.");
     }
-    private void EnsureNoReparsePoints(string fullPath)
+    internal static void EnsureNoReparsePoints(string root, string fullPath)
     {
-        var relative = Path.GetRelativePath(Root, fullPath);
-        var current = Root;
+        var relative = Path.GetRelativePath(root, fullPath);
+        var current = root;
         RejectReparsePoint(current);
         if (relative == ".") return;
         foreach (var part in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
@@ -269,16 +299,15 @@ public abstract class WorkspaceTool(WorkspaceLocator workspace)
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidDataException("Reparse points and symbolic links are not available to tools.");
     }
-    private static bool IsProtectedDirectoryName(string value) => ProtectedDirectoryNames.Contains(value);
-    private bool IsUnavailablePart(string value)
+    internal static bool IsUnavailablePart(string value, bool allowVsCodeStructuredConfig = false)
     {
-        if (AllowVsCodeStructuredConfig &&
+        if (allowVsCodeStructuredConfig &&
             (value.Equals(".vscode", StringComparison.OrdinalIgnoreCase) ||
              Path.GetExtension(value).Equals(".code-workspace", StringComparison.OrdinalIgnoreCase)))
             return false;
-        return IsProtectedDirectoryName(value) || IsSensitiveFileName(value);
+        return ProtectedDirectoryNames.Contains(value) || IsSensitiveFileName(value);
     }
-    private static bool IsSensitiveFileName(string value)
+    internal static bool IsSensitiveFileName(string value)
     {
         if (SensitiveFileNames.Contains(value) || value.Equals(".env", StringComparison.OrdinalIgnoreCase) || value.StartsWith(".env.", StringComparison.OrdinalIgnoreCase) ||
             Path.GetExtension(value).Equals(".code-workspace", StringComparison.OrdinalIgnoreCase)) return true;
@@ -610,7 +639,7 @@ public static class TrustedDeveloperExecutable
             .Select(path => Path.Combine(path.Trim().Trim('"'), fileName)).ToArray();
 }
 
-public sealed class SaveMemoryAgentTool(IMemoryStore memories) : IAgentTool
+public sealed class SaveMemoryAgentTool(IMemoryStore memories, WorkspaceLocator? workspace = null) : IAgentTool
 {
     public ToolDefinition Definition { get; } = new("save_memory", "Save or update an explicit scoped memory after user approval. Use user for cross-session preferences, session for current-chat notes, and project only with a workspace-relative scopeId.", ToolRiskLevel.WorkspaceWrite,
         [new("name", "string", "Short memory name.", true), new("content", "string", "Stable fact or explicit user preference. Do not store secrets or temporary task state.", true),new("scope","string","user, session, or project; default user.",false,["user","session","project"]),new("scopeId","string","Required for project; session defaults to the current chat ID."),new("tags","array","Optional short classification tags.")],
@@ -624,8 +653,9 @@ public sealed class SaveMemoryAgentTool(IMemoryStore memories) : IAgentTool
         if (SensitiveDataRedactor.ContainsLikelySecret(content))
             throw new InvalidDataException("Memory content appears to contain a credential, token, password, or private key and was not saved.");
         var scopeText=root.TryGetProperty("scope",out var scopeValue)&&scopeValue.ValueKind==JsonValueKind.String?scopeValue.GetString()??"user":"user";var scope=scopeText.ToLowerInvariant() switch{"user"=>MemoryScope.User,"session"=>MemoryScope.Session,"project"=>MemoryScope.Project,_=>throw new InvalidDataException("scope must be user, session, or project.")};var scopeId=root.TryGetProperty("scopeId",out var scopeIdValue)&&scopeIdValue.ValueKind==JsonValueKind.String?scopeIdValue.GetString()?.Trim():null;if(scope==MemoryScope.Session&&string.IsNullOrWhiteSpace(scopeId))scopeId=request.SessionId;if(scope==MemoryScope.Project){if(string.IsNullOrWhiteSpace(scopeId))throw new InvalidDataException("project memory requires scopeId.");if(Path.IsPathRooted(scopeId)||scopeId.Split(['/','\\']).Any(x=>x==".."))throw new InvalidDataException("project scopeId must be workspace-relative.");}if(scope==MemoryScope.User)scopeId=null;var tags=root.TryGetProperty("tags",out var tagsValue)&&tagsValue.ValueKind==JsonValueKind.Array?tagsValue.EnumerateArray().Where(x=>x.ValueKind==JsonValueKind.String).Select(x=>x.GetString()?.Trim()).Where(x=>!string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).Cast<string>().ToArray():null;
-        var existing = (await memories.ListAsync(ct)).FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)&&x.Scope==scope&&string.Equals(x.ScopeId,scopeId,StringComparison.OrdinalIgnoreCase));
-        await memories.SaveAsync(new(existing?.Id ?? $"MEM-{Guid.NewGuid():N}", name, content, true, DateTimeOffset.UtcNow,scope,scopeId,tags), ct);
+        var workspaceId = scope == MemoryScope.Project ? workspace?.Id : null;
+        var existing = (await memories.ListAsync(ct)).FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)&&x.Scope==scope&&string.Equals(x.ScopeId,scopeId,StringComparison.OrdinalIgnoreCase)&&string.Equals(x.WorkspaceId,workspaceId,StringComparison.OrdinalIgnoreCase));
+        await memories.SaveAsync(new(existing?.Id ?? $"MEM-{Guid.NewGuid():N}", name, content, true, DateTimeOffset.UtcNow,scope,scopeId,tags,workspaceId), ct);
         return new(request.Id, Definition.Name, ToolExecutionStatus.Success, $"Memory saved: {name}",
             Summary: $"Saved {scope} memory '{name}'", NextAction: "Continue the task; the approved memory is available only in its configured scope.");
     }

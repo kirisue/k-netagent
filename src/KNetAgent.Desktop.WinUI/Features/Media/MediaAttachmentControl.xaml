@@ -1,0 +1,33 @@
+<UserControl
+    x:Class="KNetAgent.Desktop.WinUI.Features.Media.MediaAttachmentControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Loaded="Control_Loaded"
+    Unloaded="Control_Unloaded">
+    <Border Padding="10"
+            CornerRadius="8"
+            BorderThickness="1"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+        <Grid ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="图片附件" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding PendingImageSummary}"
+                           TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="{Binding Status}"
+                           FontSize="12"
+                           TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="选择图片" Click="Pick_Click" />
+            <Button Grid.Column="2" Content="移除" Click="Clear_Click"
+                    IsEnabled="{Binding HasPendingImage}" />
+        </Grid>
+    </Border>
+</UserControl>

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>KNetAgent.Desktop.WinUI</RootNamespace>
+    <AssemblyName>KNetAgent.Desktop.WinUI</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained Condition="'$(SelfContained)' == 'true'">true</WindowsAppSDKSelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Description>K.netagent Codex-inspired Windows-native WinUI 3 desktop shell.</Description>
+  </PropertyGroup>
+
+  <!-- A global RuntimeFrameworkVersion also overrides the Windows SDK runtime pack.
+       Pin only the .NET runtime/host when building the self-contained installer. -->
+  <ItemGroup Condition="'$(KNetPublishRuntimeVersion)' != ''">
+    <FrameworkReference Update="Microsoft.NETCore.App" RuntimeFrameworkVersion="$(KNetPublishRuntimeVersion)" />
+    <KnownAppHostPack Update="Microsoft.NETCore.App" AppHostPackVersion="$(KNetPublishRuntimeVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TestAgent.Core\TestAgent.Core.csproj" />
+    <ProjectReference Include="..\TestAgent.Infrastructure\TestAgent.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
+  </ItemGroup>
+</Project>

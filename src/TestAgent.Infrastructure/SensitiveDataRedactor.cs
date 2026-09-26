@@ -6,7 +6,7 @@ namespace TestAgent.Infrastructure;
 public static partial class SensitiveDataRedactor
 {
     private static readonly string[] SensitiveNames =
-    ["content", "oldtext", "newtext", "apikey", "api_key", "authorization", "token", "password", "secret", "credential", "key"];
+    ["content", "oldtext", "newtext", "task", "prompt", "apikey", "api_key", "authorization", "token", "password", "secret", "credential", "key"];
 
     public static string Arguments(string json, int max = 1_200)
     {

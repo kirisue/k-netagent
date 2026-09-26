@@ -1,0 +1,459 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="KNetAgent.Desktop.WinUI.McpPeersDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="外部 Agent / MCP"
+    CloseButtonText="关闭"
+    DefaultButton="Close"
+    MaxWidth="1000"
+    Loaded="McpPeersDialog_Loaded">
+
+    <ScrollViewer
+        MaxHeight="680"
+        HorizontalAlignment="Stretch"
+        HorizontalContentAlignment="Stretch"
+        HorizontalScrollBarVisibility="Disabled"
+        VerticalScrollBarVisibility="Auto">
+        <Grid Padding="0,4,0,2" RowSpacing="12">
+            <VisualStateManager.VisualStateGroups>
+                <VisualStateGroup x:Name="ResponsiveLayoutStates">
+                    <VisualState x:Name="NarrowLayout">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="0" />
+                        </VisualState.StateTriggers>
+                    </VisualState>
+                    <VisualState x:Name="WideLayout">
+                        <VisualState.StateTriggers>
+                            <AdaptiveTrigger MinWindowWidth="780" />
+                        </VisualState.StateTriggers>
+                        <VisualState.Setters>
+                            <Setter Target="TopActionColumn2.Width" Value="*" />
+                            <Setter Target="TopActionColumn3.Width" Value="*" />
+                            <Setter Target="TopActionsGrid.RowSpacing" Value="0" />
+                            <Setter Target="AddClaudeButton.(Grid.Row)" Value="0" />
+                            <Setter Target="AddClaudeButton.(Grid.Column)" Value="1" />
+                            <Setter Target="ShowCustomHttpEditorButton.(Grid.Row)" Value="0" />
+                            <Setter Target="ShowCustomHttpEditorButton.(Grid.Column)" Value="2" />
+                            <Setter Target="RefreshPeersButton.(Grid.Row)" Value="0" />
+                            <Setter Target="RefreshPeersButton.(Grid.Column)" Value="3" />
+
+                            <Setter Target="CustomHttpLayoutGrid.ColumnSpacing" Value="8" />
+                            <Setter Target="CustomHttpLayoutGrid.RowSpacing" Value="0" />
+                            <Setter Target="CustomHttpNameColumn.Width" Value="180" />
+                            <Setter Target="CustomHttpEndpointColumn.Width" Value="*" />
+                            <Setter Target="CustomHttpAddColumn.Width" Value="Auto" />
+                            <Setter Target="CustomHttpCancelColumn.Width" Value="Auto" />
+                            <Setter Target="CustomHttpEndpointBox.(Grid.Row)" Value="0" />
+                            <Setter Target="CustomHttpEndpointBox.(Grid.Column)" Value="1" />
+                            <Setter Target="AddCustomHttpButton.(Grid.Row)" Value="0" />
+                            <Setter Target="AddCustomHttpButton.(Grid.Column)" Value="2" />
+                            <Setter Target="CancelCustomHttpButton.(Grid.Row)" Value="0" />
+                            <Setter Target="CancelCustomHttpButton.(Grid.Column)" Value="3" />
+                            <Setter Target="CustomHttpHelpText.(Grid.Row)" Value="1" />
+                            <Setter Target="CustomHttpHelpText.(Grid.ColumnSpan)" Value="4" />
+                            <Setter Target="CustomHttpHelpText.Margin" Value="0,7,0,0" />
+
+                            <Setter Target="PeerWorkspaceGrid.MinHeight" Value="390" />
+                            <Setter Target="PeerWorkspaceGrid.ColumnSpacing" Value="14" />
+                            <Setter Target="PeerWorkspaceGrid.RowSpacing" Value="0" />
+                            <Setter Target="PeerWorkspaceListColumn.Width" Value="290" />
+                            <Setter Target="PeerWorkspaceDetailsColumn.Width" Value="*" />
+                            <Setter Target="PeerWorkspaceFirstRow.Height" Value="*" />
+                            <Setter Target="PeerWorkspaceSecondRow.Height" Value="0" />
+                            <Setter Target="PeerListBorder.Height" Value="Auto" />
+                            <Setter Target="PeerDetailsBorder.(Grid.Row)" Value="0" />
+                            <Setter Target="PeerDetailsBorder.(Grid.Column)" Value="1" />
+                            <Setter Target="PeerDetailsBorder.Margin" Value="0" />
+
+                            <Setter Target="PeerHeaderSecondColumn.Width" Value="Auto" />
+                            <Setter Target="PeerHeaderToggle.(Grid.Row)" Value="0" />
+                            <Setter Target="PeerHeaderToggle.(Grid.Column)" Value="1" />
+                            <Setter Target="PeerHeaderToggle.Margin" Value="12,0,0,0" />
+
+                            <Setter Target="PeerActionColumn2.Width" Value="*" />
+                            <Setter Target="PeerActionColumn3.Width" Value="*" />
+                            <Setter Target="PeerActionsGrid.RowSpacing" Value="0" />
+                            <Setter Target="DisconnectPeerButton.(Grid.Row)" Value="0" />
+                            <Setter Target="DisconnectPeerButton.(Grid.Column)" Value="1" />
+                            <Setter Target="RefreshToolsButton.(Grid.Row)" Value="0" />
+                            <Setter Target="RefreshToolsButton.(Grid.Column)" Value="2" />
+                            <Setter Target="DeletePeerButton.(Grid.Row)" Value="0" />
+                            <Setter Target="DeletePeerButton.(Grid.Column)" Value="3" />
+                        </VisualState.Setters>
+                    </VisualState>
+                </VisualStateGroup>
+            </VisualStateManager.VisualStateGroups>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Spacing="4">
+                <TextBlock
+                    Text="让 K.netagent 在需要时借用另一个 Agent 公开的 MCP 工具。连接仅在本程序运行期间保持。"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Text="添加、刷新和工具请求都不会自动启动进程；只有用户点击连接后才可使用。外部工具仍走原有 call tool 审批。"
+                    TextWrapping="Wrap"
+                    FontSize="11"
+                    Foreground="{StaticResource KNetTextSecondaryBrush}" />
+            </StackPanel>
+
+            <Grid x:Name="TopActionsGrid" Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition x:Name="TopActionColumn2" Width="0" />
+                    <ColumnDefinition x:Name="TopActionColumn3" Width="0" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Button
+                    x:Name="AddCodexButton"
+                    Content="添加 Codex…"
+                    Click="AddCodex_Click"
+                    HorizontalAlignment="Stretch"
+                    Style="{StaticResource KNetSurfaceButtonStyle}" />
+                <Button
+                    x:Name="AddClaudeButton"
+                    Grid.Column="1"
+                    Content="添加 Claude Code…"
+                    Click="AddClaude_Click"
+                    HorizontalAlignment="Stretch"
+                    Style="{StaticResource KNetSurfaceButtonStyle}" />
+                <Button
+                    x:Name="ShowCustomHttpEditorButton"
+                    Grid.Row="1"
+                    Content="添加自定义 HTTP…"
+                    Click="ShowCustomHttpEditor_Click"
+                    HorizontalAlignment="Stretch"
+                    Style="{StaticResource KNetSurfaceButtonStyle}" />
+                <Button
+                    x:Name="RefreshPeersButton"
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    Content="刷新状态"
+                    Click="RefreshPeers_Click"
+                    HorizontalAlignment="Stretch"
+                    Style="{StaticResource KNetSurfaceButtonStyle}" />
+                <ProgressRing
+                    Grid.RowSpan="2"
+                    Grid.Column="4"
+                    Width="20"
+                    Height="20"
+                    VerticalAlignment="Center"
+                    IsActive="{x:Bind ViewModel.McpPeerBusy, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.McpPeerBusy, Mode=OneWay}" />
+            </Grid>
+
+            <Border
+                x:Name="CustomHttpEditor"
+                Grid.Row="2"
+                Visibility="Collapsed"
+                Background="{StaticResource KNetSurfaceBrush}"
+                BorderBrush="{StaticResource KNetBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="12">
+                <Grid x:Name="CustomHttpLayoutGrid" RowSpacing="7">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="CustomHttpNameColumn" Width="*" />
+                        <ColumnDefinition x:Name="CustomHttpEndpointColumn" Width="0" />
+                        <ColumnDefinition x:Name="CustomHttpAddColumn" Width="0" />
+                        <ColumnDefinition x:Name="CustomHttpCancelColumn" Width="0" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBox
+                        x:Name="CustomHttpNameBox"
+                        Header="名称"
+                        PlaceholderText="本地 MCP" />
+                    <TextBox
+                        x:Name="CustomHttpEndpointBox"
+                        Grid.Row="1"
+                        Header="回环 Endpoint"
+                        PlaceholderText="http://127.0.0.1:3000/mcp" />
+                    <Button
+                        x:Name="AddCustomHttpButton"
+                        Grid.Row="2"
+                        Content="添加"
+                        Click="AddCustomHttp_Click"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Bottom"
+                        Style="{StaticResource KNetPrimaryButtonStyle}" />
+                    <Button
+                        x:Name="CancelCustomHttpButton"
+                        Grid.Row="3"
+                        Content="取消"
+                        Click="HideCustomHttpEditor_Click"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Bottom"
+                        Style="{StaticResource KNetSurfaceButtonStyle}" />
+                    <TextBlock
+                        x:Name="CustomHttpHelpText"
+                        Grid.Row="4"
+                        Text="安全限制：只接受 localhost、127.0.0.1 或 [::1] 的 http/https 地址；不能连接公网或局域网 MCP。"
+                        TextWrapping="Wrap"
+                        FontSize="11"
+                        Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                </Grid>
+            </Border>
+
+            <Grid x:Name="PeerWorkspaceGrid" Grid.Row="3" RowSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="PeerWorkspaceListColumn" Width="*" />
+                    <ColumnDefinition x:Name="PeerWorkspaceDetailsColumn" Width="0" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="PeerWorkspaceFirstRow" Height="Auto" />
+                    <RowDefinition x:Name="PeerWorkspaceSecondRow" Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    x:Name="PeerListBorder"
+                    Height="180"
+                    Background="{StaticResource KNetSurfaceBrush}"
+                    BorderBrush="{StaticResource KNetBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="8">
+                    <Grid RowSpacing="7">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="已配置的 Peer" Style="{StaticResource KNetSectionLabelStyle}" Margin="4,0,0,0" />
+                        <ListView
+                            Grid.Row="1"
+                            ItemsSource="{Binding McpPeers}"
+                            SelectedItem="{Binding SelectedMcpPeer, Mode=TwoWay}"
+                            SelectionMode="Single"
+                            Background="Transparent">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Padding="2,5" Spacing="3">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding StateText}" FontSize="11" Foreground="{StaticResource KNetAccentBrush}" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding KindText}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                        <TextBlock Text="{Binding SourceText}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <Border
+                    x:Name="PeerDetailsBorder"
+                    Grid.Row="1"
+                    Margin="0,0,0,0"
+                    Background="{StaticResource KNetSurfaceBrush}"
+                    BorderBrush="{StaticResource KNetBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12">
+                    <Grid RowSpacing="9">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Grid x:Name="PeerHeaderGrid" RowSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition x:Name="PeerHeaderSecondColumn" Width="0" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="{Binding SelectedMcpPeer.Name}" TextWrapping="Wrap" FontSize="18" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding SelectedMcpPeer.KindText}" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                x:Name="PeerHeaderToggle"
+                                Grid.Row="1"
+                                Header="允许 Agent 使用"
+                                IsOn="{x:Bind ViewModel.SelectedMcpPeerEnabled, Mode=OneWay}"
+                                Toggled="TogglePeerEnabled_Toggled" />
+                        </Grid>
+
+                        <TextBlock
+                            Grid.Row="1"
+                            Text="{Binding SelectedMcpPeer.SourceText}"
+                            TextWrapping="Wrap"
+                            IsTextSelectionEnabled="True"
+                            FontSize="11"
+                            Foreground="{StaticResource KNetTextSecondaryBrush}" />
+
+                        <Grid x:Name="PeerActionsGrid" Grid.Row="2" ColumnSpacing="8" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition x:Name="PeerActionColumn2" Width="0" />
+                                <ColumnDefinition x:Name="PeerActionColumn3" Width="0" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Button
+                                x:Name="ConnectPeerButton"
+                                Content="连接"
+                                Click="ConnectPeer_Click"
+                                HorizontalAlignment="Stretch"
+                                IsEnabled="{x:Bind ViewModel.CanConnectSelectedMcpPeer, Mode=OneWay}"
+                                Style="{StaticResource KNetPrimaryButtonStyle}" />
+                            <Button
+                                x:Name="DisconnectPeerButton"
+                                Grid.Column="1"
+                                Content="断开"
+                                Click="DisconnectPeer_Click"
+                                HorizontalAlignment="Stretch"
+                                IsEnabled="{x:Bind ViewModel.CanDisconnectSelectedMcpPeer, Mode=OneWay}"
+                                Style="{StaticResource KNetSurfaceButtonStyle}" />
+                            <Button
+                                x:Name="RefreshToolsButton"
+                                Grid.Row="1"
+                                Content="刷新工具"
+                                Click="RefreshTools_Click"
+                                HorizontalAlignment="Stretch"
+                                IsEnabled="{x:Bind ViewModel.HasSelectedMcpPeer, Mode=OneWay}"
+                                Style="{StaticResource KNetSurfaceButtonStyle}" />
+                            <Button
+                                x:Name="DeletePeerButton"
+                                Grid.Row="1"
+                                Grid.Column="1"
+                                Content="删除配置"
+                                Click="DeletePeer_Click"
+                                HorizontalAlignment="Stretch"
+                                IsEnabled="{x:Bind ViewModel.CanDeleteSelectedMcpPeer, Mode=OneWay}"
+                                Style="{StaticResource KNetSurfaceButtonStyle}"
+                                Foreground="{StaticResource KNetDangerBrush}" />
+                        </Grid>
+
+                        <StackPanel Grid.Row="3" Spacing="2">
+                            <TextBlock Text="{Binding SelectedMcpPeer.StateText}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding SelectedMcpPeer.ConnectedAtText}" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                            <TextBlock Text="{Binding SelectedMcpPeer.LastError}" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource KNetDangerBrush}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="4" Spacing="3">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    x:Name="AutomaticEscalationTitle"
+                                    Text="允许评估不足时提出委托（仍逐次审批）"
+                                    TextWrapping="Wrap"
+                                    VerticalAlignment="Center" />
+                                <ToggleSwitch
+                                    x:Name="AutomaticEscalationToggle"
+                                    Grid.Column="1"
+                                    AutomationProperties.Name="允许评估不足时提出委托（仍逐次审批）"
+                                    IsOn="{x:Bind ViewModel.SelectedMcpPeerAllowAutomaticEscalation, Mode=OneWay}"
+                                    IsEnabled="{x:Bind ViewModel.CanConfigureSelectedMcpPeerAutomaticEscalation, Mode=OneWay}"
+                                    Toggled="ToggleAutomaticEscalation_Toggled" />
+                            </Grid>
+                            <TextBlock
+                                Text="{x:Bind ViewModel.SelectedMcpPeerAutomaticEscalationStatus, Mode=OneWay}"
+                                TextWrapping="Wrap"
+                                FontSize="11"
+                                Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="5" Spacing="3">
+                            <TextBlock Text="对方公开的工具" Style="{StaticResource KNetSectionLabelStyle}" />
+                            <TextBlock Text="{Binding McpPeerToolsStatus}" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                        </StackPanel>
+
+                        <ListView
+                            Grid.Row="6"
+                            ItemsSource="{Binding SelectedMcpPeerTools}"
+                            SelectionMode="None"
+                            Background="Transparent">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Padding="0,5" ColumnSpacing="9">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                                            <Expander Header="输入 Schema">
+                                                <TextBlock Text="{Binding InputSchemaJson}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="Consolas" FontSize="10" />
+                                            </Expander>
+                                        </StackPanel>
+                                        <ToggleSwitch
+                                            Grid.Column="1"
+                                            Header="允许"
+                                            IsOn="{Binding IsAllowed, Mode=OneWay}"
+                                            Toggled="ToggleToolAllowed_Toggled" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <StackPanel Grid.Row="4" Spacing="6">
+                <Border
+                    Background="{StaticResource KNetSurfaceBrush}"
+                    BorderBrush="{StaticResource KNetBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="10,7">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="最近委托评估" Style="{StaticResource KNetSectionLabelStyle}" />
+                        <TextBlock
+                            Text="{x:Bind ViewModel.LatestEscalationEvent, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            IsTextSelectionEnabled="True"
+                            FontSize="11"
+                            Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                    </StackPanel>
+                </Border>
+                <TextBlock
+                    Text="{Binding McpPeerStatus}"
+                    TextWrapping="Wrap"
+                    FontSize="11"
+                    Foreground="{StaticResource KNetTextSecondaryBrush}" />
+                <InfoBar
+                    x:Name="McpOperationInfoBar"
+                    IsOpen="False"
+                    Severity="Error"
+                    Title="外部 Agent 操作未完成"
+                    IsClosable="True" />
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</ContentDialog>
