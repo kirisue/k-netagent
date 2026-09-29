@@ -1,5 +1,7 @@
 # K.netagentV0.1 — Windows 原生单 Agent
 
+**简体中文** | [English](README.en.md)
+
 K.netagent 是使用 **.NET 10** 构建的 Windows 原生桌面 Agent。项目优先服务 Windows 10/11，目标不是复制一个聊天窗口，而是逐步形成一套由用户掌控的本地 Agent 工作环境：流式对话、项目工作区、跨会话记忆、受控工具、任务恢复和可审计的外部能力协作。
 
 ## 当前成果一览
@@ -135,7 +137,7 @@ WinUI 3 入口支持像 Codex 一样管理本地项目：点击会话顶部的�
 - OpenAI 预设使用 `gpt-5.6-sol`；模型输入仍可自由编辑，并提供 `gpt-5.6-terra` 与 `gpt-5.6-luna` 建议。
 - GPT-5.6 推理强度可选 `none / low / medium / high / xhigh / max`，推荐默认值为 `medium`。
 - 推荐默认最大输出为 32,768 tokens、超时 300 秒；设置页可调整到 128,000 tokens 和 600 秒。Tokens 是单次回答输出上限，不是上下文窗口，调高会增加潜在延迟和费用，并不表示每次都会用满。
-- `reasoning_effort` 与 `max_completion_tokens` 只对官方 OpenAI 的 GPT-5.6 Chat Completions 请求启用；其他兼容 Provider 继续使用原有 `max_tokens`，避免不兼容字段导致请求失败。
+- 当 `providerId=openai` 且模型名以 `gpt-5.6` 开头时，程序发送 `reasoning_effort` 与 `max_completion_tokens`；此判断不检查 Endpoint 是否为官方域名。其他兼容 Provider 继续使用原有 `max_tokens`；这些字段和模型名是否可用，仍需以目标端点的支持情况为准。
 - API Key 使用 Windows DPAPI、当前用户作用域加密保存。
 - Key 不写入仓库、普通配置或日志。
 - 配置与用户数据位于 `%LOCALAPPDATA%\TestAgent\`。
